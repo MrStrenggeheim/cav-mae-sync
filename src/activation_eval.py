@@ -74,7 +74,7 @@ class ActivationEvaluator:
                 video = video.to(self.device)
                 labels = labels.to(self.device)
                 
-                print(f"Audio shape: {audio.shape}, Video shape: {video.shape}")
+                # print(f"Audio shape: {audio.shape}, Video shape: {video.shape}")
 
                 if video.ndim != 5 or audio.ndim != 4:
                     raise RuntimeError(f"Unexpected shapes: audio {tuple(audio.shape)}, video {tuple(video.shape)}")
@@ -88,8 +88,8 @@ class ActivationEvaluator:
                 # Forward
                 audio_out, video_out, cls_a, cls_v = self.model.module.forward_feat(audio_input, video_input)
                 
-                print(f"Audio out shape: {audio_out.shape}, Video out shape: {video_out.shape}")
-                print(f"Cls_a shape: {cls_a.shape}, Cls_v shape: {cls_v.shape}")
+                # print(f"Audio out shape: {audio_out.shape}, Video out shape: {video_out.shape}")
+                # print(f"Cls_a shape: {cls_a.shape}, Cls_v shape: {cls_v.shape}")
 
                 B, T, C, H, W = video.shape
                 # Log embeddings

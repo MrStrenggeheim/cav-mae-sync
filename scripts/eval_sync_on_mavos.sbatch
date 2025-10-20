@@ -2,7 +2,7 @@
 #SBATCH --job-name="Forward CAV-MAE-Sync on MavosDD cls-test"
 #SBATCH --nodes=1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --gres=gpu:1,VRAM:32G
+#SBATCH --gres=gpu:1,VRAM:64G
 ##SBATCH --gres=gpu:2,VRAM:32G
 ###SBATCH --gres=VRAM:14G
 ##SBATCH --constraint="GPU_GEN:AMPERE|GPU_GEN:TURING"
@@ -30,9 +30,9 @@ model_path=/storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_m
 python3 ${project_path}/src/activation_eval.py \
     --model_path ${model_path} \
     --csv_path /storage/slurm/schnackl/fakesync/data/mavosdd/mavos_open_model.csv \
-    --batch_size 4 \
+    --batch_size 64 \
     --output ${project_path}/outputs/mavos/cls_test \
-    --max_samples 4 #4096 #8192
+    --max_samples 4096 #4096 #8192
 
     # --batch_size 8 \ 
     # --output ${project_path}/outputs/mavos/ \
