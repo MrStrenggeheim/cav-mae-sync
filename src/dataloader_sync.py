@@ -345,14 +345,16 @@ class AudiosetDataset(Dataset):
             if not fbanks:
                 raise RuntimeError(f"No valid frames found for video {datum['video_id']}")
             
-            label_indices = np.zeros(self.label_num) + (self.label_smooth / self.label_num)
-            for label_str in datum['labels'].split(','):
-                label_indices[int(self.index_dict[label_str])] = 1.0 - self.label_smooth
-            label_indices = torch.FloatTensor(label_indices)
-            
+            # label_indices = np.zeros(self.label_num) + (self.label_smooth / self.label_num)
+            # for label_str in datum['labels'].split(','):
+            #     label_indices[int(self.index_dict[label_str])] = 1.0 - self.label_smooth
+            # label_indices = torch.FloatTensor(label_indices)
+            label_indices = datum['labels'].split(',')
+            label_indices = [int(label_str) for label_str in label_indices]
+            label_indices = torch.FloatTensor(label_indices)[0]
             self.debug_counter += 1
 
-            return torch.stack(fbanks), torch.stack(images), label_indices, datum['video_id'], torch.tensor(frame_indices)
+            return torch.stack(fbanks), torch.stack(images), label_indices, datum['video_id']#, torch.tensor(frame_indices)
         
         # else:  # Training mode
         elif self.mode == 'train':

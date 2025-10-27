@@ -2,8 +2,10 @@
 #SBATCH --job-name="Forward CAV-MAE-Sync"
 #SBATCH --nodes=1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --gres=gpu:2,VRAM:14G
-#SBATCH --constraint="GPU_GEN:AMPERE|GPU_GEN:TURING"
+# SBATCH --gres=gpu:2,VRAM:14G
+# SBATCH --constraint="GPU_GEN:AMPERE|GPU_GEN:TURING"
+
+#SBATCH --gres=gpu:1,VRAM:16G
 #SBATCH --mem=128G
 #SBATCH --time=8:00:00
 #SBATCH --mail-type=END
@@ -28,7 +30,8 @@ model_path=/storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_m
 
 python3 ${project_path}/src/activation_eval.py \
     --model_path ${model_path} \
-    --csv_path /storage/slurm/schnackl/fakesync/data/fakeavceleb/train_split.csv \
-    --batch_size 48 \
-    --output ${project_path}/outputs/
-#   --max_samples 8192 \ 
+    --csv_path /storage/slurm/schnackl/fakesync/data/fakeavceleb/FakeAVCeleb/preprocessed/fakeavceleb_test_sync.csv \
+    --json_path /storage/slurm/schnackl/fakesync/data/fakeavceleb/FakeAVCeleb/preprocessed/fakeavceleb_test_sync.json \
+    --batch_size 32 \
+    --output ${project_path}/outputs/fakeavceleb/manual_pre/ \
+    --max_samples 256 ##8192 \ 48 bactch

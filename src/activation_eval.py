@@ -1,3 +1,4 @@
+import json
 import os
 import argparse
 from collections import defaultdict
@@ -13,6 +14,7 @@ import pickle as pkl
 # repo imports
 import models
 import custom_dataloader 
+import dataloader_sync
 
 
 class ActivationEvaluator:
@@ -149,6 +151,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate mean activations")
     parser.add_argument("--model_path", type=str, required=True)
     parser.add_argument("--csv_path", type=str, required=True)
+    parser.add_argument("--json_path", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--output", type=str, default="/outputs/")
     parser.add_argument("--max_samples", type=int, default=None, help="Limit number of samples for quick test runs")
@@ -169,23 +172,24 @@ if __name__ == "__main__":
 
     # Dataset config
     val_audio_conf = {
-        "num_mel_bins": 128,
-        "target_length": 1024,
-        "freqm": 0,
-        "timem": 0,
-        "mixup": 0,
-        "mode": "eval",
-        "mean": -5.081,
-        "std": 4.4849,
-        "noise": False,
-        "im_res": 224,
-    }
+        'num_mel_bins': 128, 
+        'target_length': 1024, 
+        'freqm': 0, 'timem': 0, 'mixup': 0, 
+        'dataset': "err",
+        'mode': 'retrieval', 
+        'mean': -5.081, 'std': 4.4849, 'noise': False, 'im_res': 224, 'frame_use': 5, 
+        'num_samples': None, 'total_frame': 16}
+
+    data = args.json_path
+    label_csv = args.csv_path
 
     print("Loading validation dataset from", args.csv_path)
-    val_dataset_full = custom_dataloader.VideoDataset(
-        csv_path=args.csv_path,
-        audio_conf=val_audio_conf
-    )
+    # val_dataset_full = custom_dataloader.VideoDataset(
+    #     csv_path=args.csv_path,
+    #     audio_conf=val_audio_conf
+    # )
+    val_dataset_full = dataloader_sync.AudiosetDataset(data, label_csv=label_csv, audio_conf=val_audio_conf)
+
 
     if args.max_samples is not None:
         print(f"⚠️ Limiting dataset to {args.max_samples} samples for test run")
@@ -195,8 +199,9 @@ if __name__ == "__main__":
         val_dataset = val_dataset_full
 
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=False
+        val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=32, pin_memory=False
     )
+    # batch_size=batch_size, shuffle=False, num_workers=32, pin_memory=True, collate_fn=train_collate_fn)
 
     os.makedirs(args.output, exist_ok=True)
     evaluator = ActivationEvaluator(model, val_loader)
