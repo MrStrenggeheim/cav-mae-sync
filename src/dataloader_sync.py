@@ -178,7 +178,7 @@ class AudiosetDataset(Dataset):
             image_tensor = mix_lambda * image_tensor1 + (1 - mix_lambda) * image_tensor2
             return image_tensor
 
-    def _wav2fbank(self, filename, filename2=None, mix_lambda=-1):
+    def _wav2fbank(self, filename, min_length, filename2=None, mix_lambda=-1):
         # no mixup
         if filename2 == None:
             waveform, sr = torchaudio.load(filename)
@@ -211,17 +211,12 @@ class AudiosetDataset(Dataset):
             print('there is a loading error')
 
         print("original fbank shape:", fbank.shape)
-        target_length = 1024
         n_frames = fbank.shape[0]
 
-        p = target_length - n_frames
-
-        # cut and pad
-        if p > 0:
-            m = torch.nn.ZeroPad2d((0, 0, 0, p))
+        # pad
+        if n_frames < min_length:
+            m = torch.nn.ZeroPad2d((0, 0, 0, min_length - n_frames))
             fbank = m(fbank)
-        elif p < 0:
-            fbank = fbank[0:target_length, :]
 
         return fbank
 
@@ -315,13 +310,13 @@ class AudiosetDataset(Dataset):
                 frame_path = f"{datum['video_path']}/frame_{frame_idx}/{datum['video_id']}.jpg"
                 
                 try:
-                    fbank = self._wav2fbank(datum['wav'])
+                    fbank = self._wav2fbank(datum['wav'], self.target_length)  ## actually our segment length
                     # Use the mapping function to get the spectrogram segment
                     start, end = self.map_frame_to_spectrogram(
                         frame_index=frame_idx,
                         num_frames=self.total_frame,
                         spectrogram_length=fbank.shape[0],
-                        target_length=self.target_length
+                        target_length=self.target_length ## actually our segment length
                     )
                     fbank = fbank[start:end, :]
                     
@@ -367,7 +362,7 @@ class AudiosetDataset(Dataset):
         frame_path = f"{datum['video_path']}/frame_{frame_idx}/{datum['video_id']}.jpg"
             
         try:
-            fbank = self._wav2fbank(datum['wav'])
+            fbank = self._wav2fbank(datum['wav'], self.target_length)  ## segment length
             # Use the mapping function to get the spectrogram segment
             start, end = self.map_frame_to_spectrogram(
                 frame_index=frame_idx,
