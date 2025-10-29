@@ -5,7 +5,7 @@
 # SBATCH --gres=gpu:2,VRAM:14G
 # SBATCH --constraint="GPU_GEN:AMPERE|GPU_GEN:TURING"
 
-#SBATCH --gres=gpu:1,VRAM:16G
+#SBATCH --gres=gpu:1,VRAM:64G
 #SBATCH --mem=128G
 #SBATCH --time=8:00:00
 #SBATCH --mail-type=END
@@ -32,6 +32,6 @@ python3 ${project_path}/src/activation_eval.py \
     --model_path ${model_path} \
     --csv_path /storage/slurm/schnackl/fakesync/data/fakeavceleb/FakeAVCeleb/preprocessed/fakeavceleb_test_sync.csv \
     --json_path /storage/slurm/schnackl/fakesync/data/fakeavceleb/FakeAVCeleb/preprocessed/fakeavceleb_test_sync.json \
-    --batch_size 32 \
+    --batch_size 64 \
     --output ${project_path}/outputs/fakeavceleb/manual_pre/ \
-    --max_samples 256 ##8192 \ 48 bactch
+    #--max_samples 256 ##8192 \ 48 bactch

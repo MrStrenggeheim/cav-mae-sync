@@ -267,7 +267,7 @@ class AudiosetDataset(Dataset):
         if end > spectrogram_length:
             end = spectrogram_length
             start = max(0, end - target_length)
-        
+        # print("mapFrame2Spec", frame_index, start, end)        
         return (start, end)
 
     def __getitem__(self, index):

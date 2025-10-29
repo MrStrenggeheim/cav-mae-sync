@@ -81,6 +81,10 @@ class ActivationEvaluator:
                 if video.ndim != 5 or audio.ndim != 4:
                     raise RuntimeError(f"Unexpected shapes: audio {tuple(audio.shape)}, video {tuple(video.shape)}")
 
+                # save input to disk
+                tuple = (audio.cpu().numpy(), video.cpu().numpy(), labels.cpu().numpy())
+                pkl.dump(tuple, open(os.path.join(output_path, f"input_batch_{i}.pkl"), "wb"))
+
                 # flatten batch so we process all frames at the same time
                 a_input = audio.reshape(audio.shape[0] * audio.shape[1], audio.shape[2], audio.shape[3])
                 v_input = video.reshape(video.shape[0] * video.shape[1], video.shape[2], video.shape[3], video.shape[4])
@@ -89,6 +93,9 @@ class ActivationEvaluator:
 
                 # Forward
                 audio_out, video_out, cls_a, cls_v = self.model.module.forward_feat(audio_input, video_input)
+                
+                # x, mask_a, ids_restore_a, mask_v, ids_restore_v, ca, cv, cls_a, cls_v = self.model.module.forward_encoder(audio_input, video_input, 0, 0)
+                
                 
                 # print(f"Audio out shape: {audio_out.shape}, Video out shape: {video_out.shape}")
                 # print(f"Cls_a shape: {cls_a.shape}, Cls_v shape: {cls_v.shape}")
@@ -158,8 +165,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Build model
+    SEGMENT_LENGTH = 256
     model = models.CAVMAESync(
-        audio_length=1024,
+        audio_length=SEGMENT_LENGTH,
         modality_specific_depth=11,
         num_register_tokens=4,
         total_frame=16,
@@ -173,12 +181,13 @@ if __name__ == "__main__":
     # Dataset config
     val_audio_conf = {
         'num_mel_bins': 128, 
-        'target_length': 1024, 
+        'target_length': SEGMENT_LENGTH, 
         'freqm': 0, 'timem': 0, 'mixup': 0, 
         'dataset': "err",
         'mode': 'retrieval', 
         'mean': -5.081, 'std': 4.4849, 'noise': False, 'im_res': 224, 'frame_use': 5, 
-        'num_samples': None, 'total_frame': 16}
+        'num_samples': None, 
+        'total_frame': 16}
 
     data = args.json_path
     label_csv = args.csv_path
@@ -192,8 +201,9 @@ if __name__ == "__main__":
 
 
     if args.max_samples is not None:
-        print(f"⚠️ Limiting dataset to {args.max_samples} samples for test run")
-        random_indices = random.sample(range(len(val_dataset_full)), args.max_samples)
+        max_samples = min(args.max_samples, len(val_dataset_full))
+        print(f"⚠️ Limiting dataset to {max_samples} samples for test run")
+        random_indices = random.sample(range(len(val_dataset_full)), max_samples)
         val_dataset = Subset(val_dataset_full, random_indices)
     else:
         val_dataset = val_dataset_full
