@@ -363,11 +363,13 @@ class CAVMAE(nn.Module):
             x = blk(x)
         x = self.norm(x)
 
+        ca = a
+        cv = v
         for blk in self.blocks_u:
-            ca = blk(a, 'a')
+            ca = blk(ca, 'a')
         for blk in self.blocks_u:
-            cv = blk(v, 'v')
-        
+            cv = blk(cv, 'v')
+
         if self.contrastive_heads:
             for blk in self.constrative_head_audio:
                 ca = blk(ca)

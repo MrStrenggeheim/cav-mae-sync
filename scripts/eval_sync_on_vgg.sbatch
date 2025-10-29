@@ -32,6 +32,6 @@ python3 ${project_path}/src/activation_eval.py \
     --model_path ${model_path} \
     --csv_path /storage/slurm/schnackl/fakesync/data/vgg_test/preprocessed/dataset_info.csv \
     --json_path /storage/slurm/schnackl/fakesync/data/vgg_test/preprocessed/dataset_info.json \
-    --batch_size 32 \
+    --batch_size 16 \
     --output ${project_path}/outputs/vgg_test/ \
-    --max_samples 256 ##8192 \ 48 bactch
+    --max_samples 16 ##8192 \ 48 batch

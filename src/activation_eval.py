@@ -165,7 +165,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Build model
-    SEGMENT_LENGTH = 64
+    SEGMENT_LENGTH = 32
     model = models.CAVMAESync(
         audio_length=SEGMENT_LENGTH,
         modality_specific_depth=11,
@@ -188,7 +188,7 @@ if __name__ == "__main__":
         'mean': -5.081, 'std': 4.4849, 'noise': False, 'im_res': 224, 'frame_use': 5, 
         'num_samples': None, 
         'total_frame': 16,
-        'skip_norm': True,}
+        'skip_norm': False,}
 
     data = args.json_path
     label_csv = args.csv_path
@@ -210,7 +210,7 @@ if __name__ == "__main__":
         val_dataset = val_dataset_full
 
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=32, pin_memory=False
+        val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=False
     )
     # batch_size=batch_size, shuffle=False, num_workers=32, pin_memory=True, collate_fn=train_collate_fn)
 

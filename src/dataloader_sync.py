@@ -210,7 +210,7 @@ class AudiosetDataset(Dataset):
             fbank = torch.zeros([512, 128]) + 0.01
             print('there is a loading error')
 
-        print("original fbank shape:", fbank.shape)
+        # print("original fbank shape:", fbank.shape)
         n_frames = fbank.shape[0]
 
         # pad
@@ -263,7 +263,7 @@ class AudiosetDataset(Dataset):
         if end > spectrogram_length:
             end = spectrogram_length
             start = max(0, end - target_length)
-        print("mapFrame2Spec", frame_index, start, end, spectrogram_length, target_length)        
+        # print("mapFrame2Spec", frame_index, start, end, spectrogram_length, target_length)        
         return (start, end)
 
     def __getitem__(self, index):
