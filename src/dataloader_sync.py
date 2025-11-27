@@ -178,7 +178,7 @@ class AudiosetDataset(Dataset):
             image_tensor = mix_lambda * image_tensor1 + (1 - mix_lambda) * image_tensor2
             return image_tensor
 
-    def _wav2fbank(self, filename, min_length, filename2=None, mix_lambda=-1):
+    def _wav2fbank(self, filename, filename2=None, mix_lambda=-1):
         # no mixup
         if filename2 == None:
             waveform, sr = torchaudio.load(filename)
@@ -210,13 +210,17 @@ class AudiosetDataset(Dataset):
             fbank = torch.zeros([512, 128]) + 0.01
             print('there is a loading error')
 
-        # print("original fbank shape:", fbank.shape)
+        target_length = 1024
         n_frames = fbank.shape[0]
 
-        # pad
-        if n_frames < min_length:
-            m = torch.nn.ZeroPad2d((0, 0, 0, min_length - n_frames))
+        p = target_length - n_frames
+
+        # cut and pad
+        if p > 0:
+            m = torch.nn.ZeroPad2d((0, 0, 0, p))
             fbank = m(fbank)
+        elif p < 0:
+            fbank = fbank[0:target_length, :]
 
         return fbank
 
@@ -263,7 +267,7 @@ class AudiosetDataset(Dataset):
         if end > spectrogram_length:
             end = spectrogram_length
             start = max(0, end - target_length)
-        # print("mapFrame2Spec", frame_index, start, end, spectrogram_length, target_length)        
+        
         return (start, end)
 
     def __getitem__(self, index):
@@ -310,13 +314,13 @@ class AudiosetDataset(Dataset):
                 frame_path = f"{datum['video_path']}/frame_{frame_idx}/{datum['video_id']}.jpg"
                 
                 try:
-                    fbank = self._wav2fbank(datum['wav'], self.target_length)  ## actually our segment length
+                    fbank = self._wav2fbank(datum['wav'])
                     # Use the mapping function to get the spectrogram segment
                     start, end = self.map_frame_to_spectrogram(
                         frame_index=frame_idx,
                         num_frames=self.total_frame,
                         spectrogram_length=fbank.shape[0],
-                        target_length=self.target_length ## actually our segment length
+                        target_length=self.target_length
                     )
                     fbank = fbank[start:end, :]
                     
@@ -350,7 +354,7 @@ class AudiosetDataset(Dataset):
             label_indices = torch.FloatTensor(label_indices)[0]
             self.debug_counter += 1
 
-            return torch.stack(fbanks), torch.stack(images), label_indices, datum['video_id']#, torch.tensor(frame_indices)
+            return torch.stack(fbanks), torch.stack(images), label_indices, datum['video_id'], torch.tensor(frame_indices)
         
         # else:  # Training mode
         elif self.mode == 'train':
@@ -362,7 +366,7 @@ class AudiosetDataset(Dataset):
         frame_path = f"{datum['video_path']}/frame_{frame_idx}/{datum['video_id']}.jpg"
             
         try:
-            fbank = self._wav2fbank(datum['wav'], self.target_length)  ## segment length
+            fbank = self._wav2fbank(datum['wav'])
             # Use the mapping function to get the spectrogram segment
             start, end = self.map_frame_to_spectrogram(
                 frame_index=frame_idx,

@@ -13,6 +13,7 @@ from numpy.linalg import norm
 from tqdm import tqdm
 from tabulate import tabulate
 import argparse
+import pickle as pkl
 
 def get_immediate_subdirectories(a_dir):
     return [name for name in os.listdir(a_dir) if os.path.isdir(os.path.join(a_dir, name))]
@@ -146,7 +147,10 @@ def get_retrieval_result(audio_model, val_loader, direction='audio', model_type=
         # Add tqdm progress bar
         for i, batch in tqdm(enumerate(val_loader), total=len(val_loader), desc="Processing batches"):
             if 'sync' or 'enhanced' in model_type:
-                a_input, v_input, labels, video_id, frame_indices = batch
+                if len(batch) == 5:
+                    a_input, v_input, labels, video_id, frame_indices = batch
+                else: 
+                    a_input, v_input, labels, video_id = batch
             else:
                 (a_input, v_input, labels) = batch
             if i == 0:
@@ -180,6 +184,13 @@ def get_retrieval_result(audio_model, val_loader, direction='audio', model_type=
             audio_output = audio_output.to('cpu').detach()
             video_output = video_output.to('cpu').detach()
             
+            # log outputs
+            tuples = {
+                "audio_out": audio_output,
+                "video_out": video_output,
+            }
+            pkl.dump(tuples, open(os.path.join("/storage/slurm/schnackl/fakesync/cav-mae-sync/outputs/ask_test", f"forward_embeddings_{i}.pkl"), "wb"))
+            
             if 'sync' in model_type:
                 # Group features from the same video together
                 num_frames = audio_output.shape[0] // len(video_id)
@@ -188,6 +199,7 @@ def get_retrieval_result(audio_model, val_loader, direction='audio', model_type=
             
             A_a_feat.append(audio_output)
             A_v_feat.append(video_output)
+    
     A_a_feat = torch.cat(A_a_feat)
     A_v_feat = torch.cat(A_v_feat)
     if direction == 'audio':
@@ -211,8 +223,8 @@ def get_retrieval_result(audio_model, val_loader, direction='audio', model_type=
     return result['R1'], result['R5'], result['R10'], result['MR']
 
 def eval_retrieval(model, data, audio_conf, label_csv, direction, num_class, model_type='pretrain', batch_size=48, strategy='max', num_register_tokens=4, cls_token=False, local_matching=False):
-    print(model)
-    print(data)
+    # print(model)
+    # print(data)
     frame_use = 5
     # eval setting
     val_audio_conf = audio_conf
@@ -253,21 +265,23 @@ def eval_retrieval(model, data, audio_conf, label_csv, direction, num_class, mod
     msg = audio_model.load_state_dict(sdA, strict=False)
     print(msg)
     audio_model.eval()
+    # print("DEBUG GET RETRIEVAL RESULT")
     r1, r5, r10, mr = get_retrieval_result(audio_model, val_loader, direction, model_type, strategy, cls_token, local_matching)
+    # print("DEBUG RETURN RETRIEVAL RESULT")
     return r1 * 100, r5 * 100, r10 * 100, mr
 
 if __name__ == "__main__": 
     parser = argparse.ArgumentParser(description='Toy example for argument parsing')
     
-    parser.add_argument('--dataset', type=str, choices=['audioset', 'vggsound'], 
+    parser.add_argument('--dataset', type=str, default='audioset', choices=['audioset', 'vggsound'], 
                         help='Dataset to use for retrieval')
-    parser.add_argument('--strategy', type=str, 
+    parser.add_argument('--strategy', default='diagonal_mean', type=str, 
                         help='Strategy for aggregation')
-    parser.add_argument('--directions', type=str, nargs='+', 
+    parser.add_argument('--directions', default=['audio', 'video'], type=str, nargs='+', 
                         help='Directions for evaluation')
-    parser.add_argument('--nums_samples', type=int, nargs='+', 
+    parser.add_argument('--nums_samples', default=[512], type=int, nargs='+', 
                         help='Number of samples to test')
-    parser.add_argument('--model_names', type=str, nargs='+', 
+    parser.add_argument('--model_names', default=['model_3388_25'], type=str, nargs='+', 
                         help='Model names to test')
     args = parser.parse_args()
 
@@ -312,10 +326,10 @@ if __name__ == "__main__":
 
     res = []
     # for dataset in ['audioset', 'vggsound']:
-    for dataset in ['vggsound']:
+    for dataset in ['audioset']:
         if dataset == "audioset":
-            data = 'datafilles/audioset_20k/cluster_nodes/audioset_eval_5_per_class_for_retrieval_cleaned.json'
-            label_csv = 'datafilles/audioset_20k/cluster_nodes/class_labels_indices.csv'
+            data = '/storage/slurm/schnackl/fakesync/data/audioset/cleaned_audioset.json'
+            label_csv = '/storage/slurm/schnackl/fakesync/data/audioset/class_labels_indices.csv'
             num_class = 527
         elif dataset == "vggsound":
             data = 'datafiles/vgg_test_5_per_class_for_retrieval.json'
@@ -354,18 +368,21 @@ if __name__ == "__main__":
                     cls_token = False
                 print("Using model_type: ", model_type)
                 for direction in tqdm(directions, desc="Evaluating directions", leave=False):
+                    # print("DEBUG AUDIOCONF")
                     audio_conf = {'num_mel_bins': 128, 'target_length': target_length, 'freqm': 0, 'timem': 0, 'mixup': 0, 'dataset': dataset,
                                 'mode': 'retrieval', 'mean': -5.081, 'std': 4.4849, 'noise': False, 'im_res': 224, 'frame_use': 5, 'num_samples': num_samples, 'total_frame': 16}
                     if 'local' in model_name:
-                        r1, r5, r10, mr = eval_retrieval(model_path, data, audio_conf=audio_conf, label_csv=label_csv, num_class=num_class, direction=direction, model_type=model_type, batch_size=50, strategy=strategy, num_register_tokens=8 if '3388' in model_name or '2940' in model_name else 4, cls_token=cls_token, local_matching=True)
+                        r1, r5, r10, mr = eval_retrieval(model_path, data, audio_conf=audio_conf, label_csv=label_csv, num_class=num_class, direction=direction, model_type=model_type, batch_size=16, strategy=strategy, num_register_tokens=8 if '3388' in model_name or '2940' in model_name else 4, cls_token=cls_token, local_matching=True)
                     else:
-                        r1, r5, r10, mr = eval_retrieval(model_path, data, audio_conf=audio_conf, label_csv=label_csv, num_class=num_class, direction=direction, model_type=model_type, batch_size=50, strategy=strategy, num_register_tokens=8 if '3388' in model_name or '2940' in model_name else 4, cls_token=cls_token, local_matching=False)
+                        # print("DEBUG EVAL RETRIEVAL CALL")
+                        r1, r5, r10, mr = eval_retrieval(model_path, data, audio_conf=audio_conf, label_csv=label_csv, num_class=num_class, direction=direction, model_type=model_type, batch_size=16, strategy=strategy, num_register_tokens=8 if '3388' in model_name or '2940' in model_name else 4, cls_token=cls_token, local_matching=False)
+                    # print("DEBUG RETRIEVAL RESULT")
                     res.append([model_name, dataset, direction, num_samples, r1, r5, r10, mr])
+                    # print("DEBUG SORT RESULTS")
                     res_sorted = sorted(res, key=lambda x: x[-1])  # Sort by MR
                     print("\nCurrent Results Table:")
                     print(tabulate(res_sorted, headers=["Model", "Dataset", "Direction", "Num Samples", "R@1", "R@5", "R@10", "MR"]))
 
     np.savetxt('./retrieval_result.csv', res, delimiter=',', fmt='%s')
-
-
-
+    print("Final Results:")
+    print(tabulate(res, headers=["Model", "Dataset", "Direction", "Num Samples", "R@1", "R@5", "R@10", "MR"]))

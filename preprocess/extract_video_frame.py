@@ -23,6 +23,7 @@ def extract_frame(input_video_path, target_fold, extract_frame_num=16):
     ext_len = len(input_video_path.split('/')[-1].split('.')[-1])
     video_id = "-".join(input_video_path.split('/')[-5:])[:-ext_len-1]
     # print(input_video_path, '->', target_fold + '/frame_{:d}/'.format(0) + video_id + '.jpg')
+    # print(f"File exists: {os.path.exists(input_video_path)}; Filepath: {input_video_path}")
     vidcap = cv2.VideoCapture(input_video_path)
     fps = vidcap.get(cv2.CAP_PROP_FPS)
     # this is to avoid vggsound video's bug on not accurate frame count

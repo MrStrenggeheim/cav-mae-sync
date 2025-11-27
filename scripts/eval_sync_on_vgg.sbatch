@@ -35,3 +35,12 @@ python3 ${project_path}/src/activation_eval.py \
     --batch_size 16 \
     --output ${project_path}/outputs/vgg_test/ \
     --max_samples 16 ##8192 \ 48 batch
+
+
+# python src/activation_eval.py \
+#   --model_path pretrained_models/cav_mae_sync.pth \
+#   --csv_path /storage/slurm/schnackl/fakesync/data/vgg_test/preprocessed/dataset_info.csv \
+#   --json_path /storage/slurm/schnackl/fakesync/data/vgg_test/preprocessed/dataset_info.json \
+#   --batch_size 1 \
+#   --output /outputs/ask_tet/ \
+#   --max_samples 4

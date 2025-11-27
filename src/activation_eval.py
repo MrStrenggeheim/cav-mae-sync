@@ -92,10 +92,10 @@ class ActivationEvaluator:
                 audio_input, video_input = a_input.to(self.device), v_input.to(self.device)
 
                 # Forward
-                # audio_out, video_out, cls_a, cls_v = self.model.module.forward_feat(audio_input, video_input)
+                audio_out, video_out, cls_a, cls_v = self.model.module.forward_feat(audio_input, video_input)
                 
-                x, mask_a, ids_restore_a, mask_v, ids_restore_v, ca, cv, cls_a, cls_v = self.model.module.forward_encoder(audio_input, video_input, 0, 0)
-                audio_out, video_out = ca, cv
+                # x, mask_a, ids_restore_a, mask_v, ids_restore_v, ca, cv, cls_a, cls_v = self.model.module.forward_encoder(audio_input, video_input, 0, 0)
+                # audio_out, video_out = ca, cv
                 
                 # print(f"Audio out shape: {audio_out.shape}, Video out shape: {video_out.shape}")
                 # print(f"Cls_a shape: {cls_a.shape}, Cls_v shape: {cls_v.shape}")
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Build model
-    SEGMENT_LENGTH = 32
+    SEGMENT_LENGTH = 304
     model = models.CAVMAESync(
         audio_length=SEGMENT_LENGTH,
         modality_specific_depth=11,
@@ -188,7 +188,8 @@ if __name__ == "__main__":
         'mean': -5.081, 'std': 4.4849, 'noise': False, 'im_res': 224, 'frame_use': 5, 
         'num_samples': None, 
         'total_frame': 16,
-        'skip_norm': False,}
+        # 'skip_norm': False,
+        }
 
     data = args.json_path
     label_csv = args.csv_path
@@ -213,6 +214,12 @@ if __name__ == "__main__":
         val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=False
     )
     # batch_size=batch_size, shuffle=False, num_workers=32, pin_memory=True, collate_fn=train_collate_fn)
+    
+    from retrieval import get_retrieval_result
+    
+    get_retrieval_result(model, val_loader, model_type="cav-mae-sync", cls_token=True)
+    exit(0)
+    
 
     os.makedirs(args.output, exist_ok=True)
     evaluator = ActivationEvaluator(model, val_loader)
