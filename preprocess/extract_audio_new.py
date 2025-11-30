@@ -21,9 +21,9 @@ def process_single_video(args_tuple):
 
         output_f = os.path.join(target_fold, video_id + '.wav')
 
-        # Skip if exists to allow resume
-        if os.path.exists(output_f):
-            return
+        # set environment vars for sox
+        os.environ['LD_LIBRARY_PATH'] = "/home/stud/hunecke/sox/usr/lib/x86_64-linux-gnu" + ':' + os.environ.get('LD_LIBRARY_PATH', '')
+        os.environ['PATH'] = f"/home/stud/hunecke/sox/usr/bin:{os.environ['PATH']}"
 
         # Construction of the pipeline:
         # ffmpeg (16k resample) -> stdout -> pipe -> stdin -> sox (remix 1) -> file
@@ -57,9 +57,15 @@ def process_single_video(args_tuple):
         
         output, err = p2.communicate()
         
+        # Wait for p1 to finish and capture its stderr
+        err_ffmpeg = p1.stderr.read()
+        p1.wait()
+        
+        if p1.returncode != 0:
+            print(f"FFMPEG Error processing {input_f}: {err_ffmpeg.decode('utf-8', errors='replace').strip()}")
+            
         if p2.returncode != 0:
-            # Log error strictly if needed, otherwise silent like original
-            pass
+            print(f"SOX Error processing {input_f}: {err.decode('utf-8', errors='replace').strip()}")
 
     except Exception as e:
         print(f"Error processing {input_f}: {e}")

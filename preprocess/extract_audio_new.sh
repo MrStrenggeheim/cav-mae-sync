@@ -4,9 +4,9 @@
 #SBATCH --error=slurm_logs_flo/audio_%A_%a.err
 #SBATCH --time=08:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
-#SBATCH --array=0-7
+#SBATCH --array=0-1
 
 # 1. Force stdout/stderr to flush immediately
 export PYTHONUNBUFFERED=1
@@ -29,15 +29,27 @@ which python
 python --version
 
 # 4. Library Paths (Keep your SOX setup)
-export LD_LIBRARY_PATH="$HOME/sox/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
-export PATH="$HOME/sox/usr/bin:$PATH"
+# Define where you extracted the deb/binary
+MY_SOX_PATH="/home/stud/hunecke/sox"  # <--- Verify this path with 'ls' first!
+
+# Add to Library Path so the node finds libsox
+export LD_LIBRARY_PATH="$MY_SOX_PATH/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+
+# Add to System Path so 'sox' command is found
+export PATH="$MY_SOX_PATH/usr/bin:$PATH"
+
+# DEBUG: Check if it actually works before running Python
+# echo "Debug: Testing Sox..."
+# which sox
+# ldd "$MY_SOX_PATH/usr/bin/sox"
+# sox --version
 
 # INPUT_CSV="/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb.csv"
 INPUT_CSV="/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb_1percent.csv"
 # TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/audio"
 TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/audio"
 SCRIPT_PATH="/storage/slurm/schnackl/fakesync/cav-mae-sync/preprocess/extract_audio_new.py"
-NUM_SHARDS=8  # Must match array count (0-15 is 16 items)
+NUM_SHARDS=2  # Must match array count (0-15 is 16 items)
 
 # Check if files exist
 if [ ! -f "$INPUT_CSV" ]; then
