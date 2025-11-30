@@ -4,6 +4,7 @@
 import csv
 import json
 import os.path
+import logging
 
 import torchaudio
 import numpy as np
@@ -355,7 +356,52 @@ class AudiosetDataset(Dataset):
             self.debug_counter += 1
 
             return torch.stack(fbanks), torch.stack(images), label_indices, datum['video_id'], torch.tensor(frame_indices)
-        
+        elif self.mode == 'unsupervised_train':
+            fbanks = []
+            images = []
+            frame_indices = []
+            
+            # Load audio once for the whole video
+            try:
+                full_fbank = self._wav2fbank(datum['wav'])
+            except Exception as e:
+                logging.error(f"Error processing audio for video {datum['video_id']}: {str(e)}")
+                raise e
+
+            for frame_idx in range(self.total_frame):
+                frame_path = f"{datum['video_path']}/frame_{frame_idx}/{datum['video_id']}.jpg"
+                
+                try:
+                    # Use the mapping function to get the spectrogram segment
+                    start, end = self.map_frame_to_spectrogram(
+                        frame_index=frame_idx,
+                        num_frames=self.total_frame,
+                        spectrogram_length=full_fbank.shape[0],
+                        target_length=self.target_length
+                    )
+                    fbank = full_fbank[start:end, :]
+                    
+                    if not self.skip_norm:
+                        fbank = (fbank - self.norm_mean) / self.norm_std
+                except Exception as e:
+                    logging.error(f"Error slicing audio for video {datum['video_id']} frame {frame_idx}: {str(e)}")
+                    raise e
+                
+                try:
+                    image = self.get_image(frame_path)
+                except Exception as e:
+                   logging.error(f"Error loading image for video {datum['video_id']} frame {frame_idx}: {str(e)}")
+                   raise e
+                
+                fbanks.append(fbank)
+                images.append(image)
+                frame_indices.append(frame_idx)
+            
+            if not fbanks:
+                raise RuntimeError(f"No valid frames found for video {datum['video_id']}")
+            self.debug_counter += 1
+
+            return torch.stack(fbanks), torch.stack(images), datum['video_id'], torch.tensor(frame_indices)
         # else:  # Training mode
         elif self.mode == 'train':
             # Select a random frame
@@ -421,3 +467,22 @@ def train_collate_fn(batch):
     labels = torch.stack(labels)
     
     return fbanks, images, labels, video_ids, frame_indices
+
+# New function for unsupervised training collate
+def unsupervised_collate_fn(batch):
+    fbanks, images, video_ids, frame_indices = zip(*batch)
+    
+    # Stack frames from all videos into a single batch
+    # Input fbanks is tuple of (F, T, D), output is (B*F, T, D)
+    fbanks = torch.cat(fbanks)
+    images = torch.cat(images)
+    
+    # Expand video_ids to match the flattened batch
+    expanded_video_ids = []
+    for i, vid in enumerate(video_ids):
+        num_frames = frame_indices[i].shape[0]
+        expanded_video_ids.extend([vid] * num_frames)
+        
+    frame_indices = torch.cat(frame_indices)
+    
+    return fbanks, images, expanded_video_ids, frame_indices
