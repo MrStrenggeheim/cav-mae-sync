@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=extract_audio
-#SBATCH --output=slurm_logs_flo/audio_%A_%a.out
-#SBATCH --error=slurm_logs_flo/audio_%A_%a.err
+#SBATCH --output=slurm_logs_flo/extract_audio_%A_%a.out
+#SBATCH --error=slurm_logs_flo/extract_audio_%A_%a.err
 #SBATCH --time=08:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -29,16 +29,10 @@ which python
 python --version
 
 
-# DEBUG: Check if it actually works before running Python
-# echo "Debug: Testing Sox..."
-# which sox
-# ldd "$MY_SOX_PATH/usr/bin/sox"
-# sox --version
-
-# INPUT_CSV="/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb.csv"
-INPUT_CSV="/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb_1percent.csv"
-# TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/audio"
-TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/audio"
+INPUT_CSV="/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb.csv"
+# INPUT_CSV="/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb_1percent.csv"
+TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/audio"
+# TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/audio"
 SCRIPT_PATH="/storage/slurm/schnackl/fakesync/cav-mae-sync/preprocess/extract_audio_new.py"
 NUM_SHARDS=8  # Must match array count (0-15 is 16 items)
 
