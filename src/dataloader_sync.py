@@ -369,8 +369,9 @@ class AudiosetDataset(Dataset):
             try:
                 full_fbank = self._wav2fbank(datum['wav'])
             except Exception as e:
-                logging.error(f"Error processing audio for video {datum['video_id']}: {str(e)}")
-                raise e
+                logging.warning(f"Error processing audio for video {datum['video_id']}: {str(e)}")
+                logging.warning(f"Proceeding with random sample")
+                return self.__getitem__(random.randint(0, self.num_samples - 1))
 
             for frame_idx in range(self.total_frame):
                 frame_path = f"{datum['video_path']}/frame_{frame_idx}/{datum['video_id']}.jpg"
@@ -388,21 +389,25 @@ class AudiosetDataset(Dataset):
                     if not self.skip_norm:
                         fbank = (fbank - self.norm_mean) / self.norm_std
                 except Exception as e:
-                    logging.error(f"Error slicing audio for video {datum['video_id']} frame {frame_idx}: {str(e)}")
-                    raise e
+                    logging.warning(f"Error slicing audio for video {datum['video_id']} frame {frame_idx}: {str(e)}")
+                    logging.warning(f"Proceeding with random sample")
+                    return self.__getitem__(random.randint(0, self.num_samples - 1))
                 
                 try:
                     image = self.get_image(frame_path)
                 except Exception as e:
-                   logging.error(f"Error loading image for video {datum['video_id']} frame {frame_idx}: {str(e)}")
-                   raise e
+                   logging.warning(f"Error loading image for video {datum['video_id']} frame {frame_idx}: {str(e)}")
+                   logging.warning(f"Proceeding with random sample")
+                   return self.__getitem__(random.randint(0, self.num_samples - 1))
                 
                 fbanks.append(fbank)
                 images.append(image)
                 frame_indices.append(frame_idx)
             
             if not fbanks:
-                raise RuntimeError(f"No valid frames found for video {datum['video_id']}")
+                logging.warning(f"No valid frames found for video {datum['video_id']}")
+                logging.warning(f"Proceeding with random sample")
+                return self.__getitem__(random.randint(0, self.num_samples - 1))
             self.debug_counter += 1
 
             return torch.stack(fbanks), torch.stack(images), datum['video_id'], torch.tensor(frame_indices)
