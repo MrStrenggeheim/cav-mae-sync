@@ -5,72 +5,51 @@ import pandas as pd
 import numpy as np
 from multiprocessing import Pool, cpu_count
 from tqdm import tqdm
+import logging
+
+def get_video_id(input_f):
+    """
+    Extracts video ID from filename using the specific logic.
+    """
+    parts = input_f.split('/')
+    filename = parts[-1]
+    ext_len = len(filename.split('.')[-1])
+    # Join last 5 parts, remove extension
+    return "-".join(parts[-5:])[:-ext_len-1]
 
 def process_single_video(args_tuple):
     """
     Worker function to process a single video file.
-    Combines ffmpeg and sox via a pipe to avoid intermediate file IO.
+    Uses ffmpeg directly to extract audio and select first channel.
     """
     input_f, target_fold = args_tuple
     
     try:
-        # --- PRESERVE ORIGINAL FILENAME LOGIC (DO NOT CHANGE) ---
-        ext_len = len(input_f.split('/')[-1].split('.')[-1])
-        video_id = "-".join(input_f.split('/')[-5:])[:-ext_len-1]
-        # --------------------------------------------------------
-
+        video_id = get_video_id(input_f)
         output_f = os.path.join(target_fold, video_id + '.wav')
 
-        # set environment vars for sox
-        os.environ['LD_LIBRARY_PATH'] = "/home/stud/hunecke/sox/usr/lib/x86_64-linux-gnu" + ':' + os.environ.get('LD_LIBRARY_PATH', '')
-        os.environ['PATH'] = f"/home/stud/hunecke/sox/usr/bin:{os.environ['PATH']}"
-
-        # Construction of the pipeline:
-        # ffmpeg (16k resample) -> stdout -> pipe -> stdin -> sox (remix 1) -> file
-        
-        # 1. ffmpeg command: Output to stdout (-) instead of file
-        ffmpeg_cmd = [
+        cmd = [
             'ffmpeg',
-            '-y',               # Overwrite without asking
+            '-y',
+            '-v', 'error',
             '-i', input_f,
-            '-vn',              # No video
-            '-loglevel', 'error',
-            '-ar', '16000',     # Resample 16k
-            '-f', 'wav',        # Force wav format for pipe
-            '-'                 # Output to stdout
+            '-vn',
+            '-ar', '16000',
+            '-af', 'pan=mono|c0=c0',
+            '-threads', '1',
+            output_f
         ]
 
-        # 2. sox command: Input from stdin (-)
-        sox_cmd = [
-            'sox',
-            '-t', 'wav', '-',   # Type wav, input from stdin
-            output_f,
-            'remix', '1'        # Extract first channel
-        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
 
-        # Execute pipeline
-        p1 = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        p2 = subprocess.Popen(sox_cmd, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        
-        # Allow p1 to receive a SIGPIPE if p2 exits
-        p1.stdout.close()
-        
-        output, err = p2.communicate()
-        
-        # Wait for p1 to finish and capture its stderr
-        err_ffmpeg = p1.stderr.read()
-        p1.wait()
-        
-        if p1.returncode != 0:
-            print(f"FFMPEG Error processing {input_f}: {err_ffmpeg.decode('utf-8', errors='replace').strip()}")
-            
-        if p2.returncode != 0:
-            print(f"SOX Error processing {input_f}: {err.decode('utf-8', errors='replace').strip()}")
-
+    except subprocess.CalledProcessError as e:
+        logging.warning(f"FFmpeg error for {input_f}: {e.stderr.decode().strip()}")
+        # Do not raise, just log and skip to allow other files to process
     except Exception as e:
-        print(f"Error processing {input_f}: {e}")
+        logging.warning(f"Error processing {input_f}: {e}")
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     parser = argparse.ArgumentParser(description='Optimized video feature extractor')
     parser.add_argument("-input_file_list", type=str, required=True, help="Path to CSV file.")
     parser.add_argument("-target_fold", type=str, default='./sample_audio/', help="Output directory.")
@@ -88,27 +67,43 @@ def main():
     os.makedirs(args.target_fold, exist_ok=True)
 
     # --- SHARDING LOGIC ---
-    # Split the file list based on the Slurm array index
     total_files = len(full_list)
     files_per_shard = np.ceil(total_files / args.num_shards).astype(int)
     start_idx = args.shard_id * files_per_shard
     end_idx = min(start_idx + files_per_shard, total_files)
     
-    # Slice the input list
     local_filelist = full_list[start_idx:end_idx]
 
-    print(f"Worker {args.shard_id}/{args.num_shards} processing {len(local_filelist)} files "
+    logging.info(f"Checking existing files in {args.target_fold}...")
+    try:
+        existing_files = set(os.listdir(args.target_fold))
+    except FileNotFoundError as e:
+        existing_files = set()
+        logging.error(f"Error accessing target folder: {e}")
+        raise e
+        
+    # Filter list
+    files_to_process = []
+    for f in local_filelist:
+        vid = get_video_id(f)
+        if f"{vid}.wav" not in existing_files:
+            files_to_process.append(f)
+            
+    logging.info(f"Worker {args.shard_id}/{args.num_shards}: {len(files_to_process)}/{len(local_filelist)} files to process "
           f"(Indices {start_idx} to {end_idx}) using {args.num_workers} threads.")
 
-    # Prepare arguments for map
-    # We use a list of tuples to pass multiple args to the worker
-    task_args = [(f, args.target_fold) for f in local_filelist]
+    if not files_to_process:
+        logging.warning("No files to process.")
+        return
 
-    # --- PARALLEL EXECUTION ---
-    # chunksize=1 ensures better distribution if processing times vary wildy
+    # Prepare arguments for map
+    task_args = [(f, args.target_fold) for f in files_to_process]
+
+    chunk_size = max(1, len(files_to_process) // (args.num_workers * 4))
+    
     with Pool(processes=args.num_workers) as pool:
-        list(tqdm(pool.imap_unordered(process_single_video, task_args, chunksize=1), 
-                  total=len(local_filelist), 
+        list(tqdm(pool.imap_unordered(process_single_video, task_args, chunksize=chunk_size), 
+                  total=len(files_to_process), 
                   desc=f'Processing Shard {args.shard_id}'))
 
 if __name__ == "__main__":
