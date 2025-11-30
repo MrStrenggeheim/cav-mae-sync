@@ -33,7 +33,8 @@ SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_$(date +%Y%m%d_
 # With 64G VRAM, we can likely handle batch_size=8 or 16 with total_frame=16
 BATCH_SIZE=8
 TOTAL_FRAME=16
-EPOCHS=50
+EPOCHS=10
+WARMUP_EPOCHS=1
 LR=1e-4
 
 echo "Starting training..."
@@ -46,6 +47,7 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --batch_size ${BATCH_SIZE} \
     --total_frame ${TOTAL_FRAME} \
     --epochs ${EPOCHS} \
+    --warmup_epochs ${WARMUP_EPOCHS} \
     --lr ${LR} \
     --save_path ${SAVE_PATH} \
     --resume /storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_mae_sync.pth \

@@ -54,7 +54,7 @@ class CAVMAEModule(pl.LightningModule):
         
         # Logging
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train_mae_loss', loss_mae, on_step=True, on_epoch=True, logger=True)
+        self.log('train_mae_loss', loss_mae, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log('train_contrast_loss', loss_c, on_step=True, on_epoch=True, logger=True)
         self.log('train_intra_acc', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log('train_inter_acc', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -88,6 +88,26 @@ class CAVMAEModule(pl.LightningModule):
             lr=self.hparams.lr, 
             weight_decay=self.hparams.weight_decay
         )
+        
+        if self.hparams.warmup_epochs > 0:
+            warmup_scheduler = optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.01, total_iters=self.hparams.warmup_epochs
+            )
+            cosine_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=self.hparams.epochs - self.hparams.warmup_epochs
+            )
+            scheduler = optim.lr_scheduler.SequentialLR(
+                optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[self.hparams.warmup_epochs]
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
+                    "frequency": 1
+                }
+            }
+
         return optimizer
 
 def get_args():
@@ -115,8 +135,9 @@ def get_args():
     
     # Training arguments
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--warmup_epochs", type=int, default=1, help="Number of warmup epochs")
     parser.add_argument("--weight_decay", type=float, default=0.05, help="Weight decay")
-    parser.add_argument("--epochs", type=int, default=20, help="Number of epochs")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
     parser.add_argument("--save_path", type=str, default="./checkpoints", help="Path to save checkpoints")
     parser.add_argument("--log_freq", type=int, default=10, help="Logging frequency (steps)")
     parser.add_argument("--resume", type=str, default=None, help="Path to resume checkpoint (ckpt file)")
