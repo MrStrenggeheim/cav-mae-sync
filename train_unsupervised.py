@@ -151,6 +151,9 @@ def get_args():
     return parser.parse_args()
 
 def main():
+    # Set float32 matmul precision to 'high'/'medium' (instead of 'highest') to utilize Tensor Cores if available
+    torch.set_float32_matmul_precision('medium')
+    
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     args = get_args()
     

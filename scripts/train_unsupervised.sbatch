@@ -2,7 +2,7 @@
 #SBATCH --job-name="Train CAV-MAE-Sync Unsupervised"
 #SBATCH --nodes=1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --gres=gpu:1,VRAM:32G
+#SBATCH --gres=gpu:1,VRAM:64G
 #SBATCH --mem=128G
 #SBATCH --time=24:00:00
 #SBATCH --mail-type=END
@@ -25,13 +25,14 @@ nvidia-smi
 
 # 3. Paths
 PROJECT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync
-DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/voxceleb2_dataset_split_without_fakeavceleb_train_dataset_info.json
+# DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/voxceleb2_dataset_split_without_fakeavceleb_train_dataset_info.json
+DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/dataset_info.json
 SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_$(date +%Y%m%d_%H%M%S)
 
 # 4. Training Configuration
 # Note: batch_size is number of videos. Effective batch size = batch_size * total_frame
 # With 64G VRAM, we can likely handle batch_size=8 or 16 with total_frame=16
-BATCH_SIZE=8
+BATCH_SIZE=16
 TOTAL_FRAME=16
 EPOCHS=10
 WARMUP_EPOCHS=1
