@@ -4,6 +4,7 @@ import os
 
 os.environ["TORCH_HOME"] = "./pretrained_models"
 import random
+import logging
 import torch
 import torch.nn as nn
 import timm
@@ -615,11 +616,11 @@ class CAVMAE(nn.Module):
         return x_a, x_v
 
     # Make sure to update the forward_contrastive method in your CAVMAE class
-    def forward_contrastive(self, audio_rep, video_rep, bidirect_contrast=False, mode="train"):
+    def forward_contrastive(self, audio_rep, video_rep, bidirect_contrast=False, mode="train", inter_weight=0.5, intra_weight=0.5):
         audio_rep = torch.nn.functional.normalize(audio_rep, dim=-1)
         video_rep = torch.nn.functional.normalize(video_rep, dim=-1)
 
-        total = torch.mm(audio_rep, torch.transpose(video_rep, 0, 1)) / 0.05
+        total = torch.mm(audio_rep, torch.transpose(video_rep, 0, 1)) / 0.05  # tau
 
         if mode == "train":
             if bidirect_contrast:
@@ -656,6 +657,84 @@ class CAVMAE(nn.Module):
                     )
                     / total.shape[0]
                 )
+        elif mode == "unsupervised_train":
+            n_samples = total.shape[0]
+            f = self.total_frame
+            
+            if n_samples % f != 0:
+                logging.error("Number of samples is not a multiple of total_frame. This may cause incorrect behavior.")
+                raise ValueError("Number of samples must be a multiple of total_frame for correct intra/inter video loss computation.")
+            
+            b = n_samples // f
+            
+            total_view = total.view(b, f, b, f)
+            
+            # Extract diagonal blocks (B, F, F) where video index matches
+            intra_logits = torch.diagonal(total_view, dim1=0, dim2=2).permute(2, 0, 1) # (B, F, F)
+            intra_logits = intra_logits.contiguous().view(-1, f) # (B*F, F)
+            
+            intra_targets = torch.arange(f, device=total.device).repeat(b) # (B*F)
+            
+            if bidirect_contrast:
+                loss_intra_a2v = torch.nn.functional.cross_entropy(intra_logits, intra_targets)
+                
+                total_t_view = total.t().view(b, f, b, f)
+                intra_logits_v2a = torch.diagonal(total_t_view, dim1=0, dim2=2).permute(2, 0, 1).contiguous().view(-1, f)
+                loss_intra_v2a = torch.nn.functional.cross_entropy(intra_logits_v2a, intra_targets)
+                
+                loss_intra = (loss_intra_a2v + loss_intra_v2a) / 2
+            else:
+                loss_intra = torch.nn.functional.cross_entropy(intra_logits, intra_targets)
+
+            # Create mask for same-video elements (block diagonal)
+            # (N, N) mask where True indicates elements belonging to the same video
+            idxs = torch.arange(b, device=total.device).repeat_interleave(f)
+            mask_block = idxs.unsqueeze(0) == idxs.unsqueeze(1)
+            
+            # We want to mask out elements where mask_block is True BUT it is not the diagonal (self)
+            mask_block.fill_diagonal_(False)
+            mask_ignore = mask_block
+            
+            # In-place masking: safe because intra_logits (which used these values) is already computed and copied
+            total[mask_ignore] = -float('inf')
+            
+            inter_targets = torch.arange(n_samples, device=total.device)
+            
+            if bidirect_contrast:
+                loss_inter_a2v = torch.nn.functional.cross_entropy(total, inter_targets)
+                
+                # For V->A, we use total.t(). 
+                # Since mask_ignore is symmetric (if i,j are same video, j,i are same video), 
+                # the in-place modification to 'total' correctly masks the transpose as well.
+                loss_inter_v2a = torch.nn.functional.cross_entropy(total.t(), inter_targets)
+                
+                loss_inter = (loss_inter_a2v + loss_inter_v2a) / 2
+            else:
+                loss_inter = torch.nn.functional.cross_entropy(total, inter_targets)
+                
+            nce = intra_weight * loss_intra + inter_weight * loss_inter
+            
+            # Calculate Accuracy
+            with torch.no_grad():
+                # Intra-video Accuracy
+                preds = torch.argmax(intra_logits, dim=1)
+                intra_acc = (preds == intra_targets).float().mean()
+                
+                if bidirect_contrast and intra_logits_v2a is not None:
+                    preds_v2a = torch.argmax(intra_logits_v2a, dim=1)
+                    intra_acc_v2a = (preds_v2a == intra_targets).float().mean()
+                    intra_acc = (intra_acc + intra_acc_v2a) / 2
+
+                # Inter-video Accuracy
+                preds_inter = torch.argmax(total, dim=1)
+                inter_acc = (preds_inter == inter_targets).float().mean()
+                
+                if bidirect_contrast:
+                    preds_inter_v2a = torch.argmax(total.t(), dim=1)
+                    inter_acc_v2a = (preds_inter_v2a == inter_targets).float().mean()
+                    inter_acc = (inter_acc + inter_acc_v2a) / 2
+            return nce, (intra_acc, inter_acc)
+
         else:  # eval mode
             # For eval, we consider any match within the same video as correct
             # This assumes that samples from the same video are grouped together
