@@ -1,5 +1,6 @@
 import argparse
 import os
+import logging
 import torch
 import torch.optim as optim
 import pytorch_lightning as pl
@@ -109,7 +110,7 @@ def get_args():
     parser.add_argument("--mae_loss_weight", type=float, default=1.0, help="Weight for MAE loss")
     parser.add_argument("--contrast_loss_weight", type=float, default=0.01, help="Weight for contrastive loss")
     parser.add_argument("--cls_token", action="store_true", help="Use CLS token")
-    parser.add_argument("--num_register_tokens", type=int, default=4, help="Number of register tokens")
+    parser.add_argument("--num_register_tokens", type=int, default=8, help="Number of register tokens")
     parser.add_argument("--contrastive_heads", action="store_true", help="Use contrastive heads")
     
     # Training arguments
@@ -129,6 +130,7 @@ def get_args():
     return parser.parse_args()
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     args = get_args()
     
     # Dataset Configuration
@@ -168,7 +170,7 @@ def main():
     )
     
     model = CAVMAEModule(args)
-    
+
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.save_path,
         filename='cav-mae-{epoch:02d}-{train_loss:.2f}',
@@ -191,8 +193,37 @@ def main():
         # Resume training if checkpoint provided
     )
     
-    print(f"Starting training with {len(dataset)} videos...")
-    trainer.fit(model, dataloader, ckpt_path=args.resume)
+    ckpt_path = args.resume
+    if args.resume and os.path.exists(args.resume):
+        logging.info(f"Checking checkpoint: {args.resume}")
+        try:
+            checkpoint = torch.load(args.resume, map_location='cpu')
+            # Heuristic to detect PL checkpoint
+            if 'pytorch-lightning_version' in checkpoint or 'callbacks' in checkpoint:
+                logging.info("Detected PyTorch Lightning checkpoint. Resuming training state...")
+                ckpt_path = args.resume
+            else:
+                logging.info("Detected raw PyTorch checkpoint. Loading model weights only...")
+                state_dict = checkpoint.get('model', checkpoint.get('state_dict', checkpoint))
+                
+                # Remove 'module.' prefix if present
+                clean_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+                
+                # Load into appropriate part of the model
+                if any(k.startswith('model.') for k in clean_state_dict):
+                     msg = model.load_state_dict(clean_state_dict, strict=False)
+                else:
+                     msg = model.model.load_state_dict(clean_state_dict, strict=False)
+                
+                logging.info(f"Weights loaded manually. Message: {msg}")
+                ckpt_path = None # Do not resume trainer state
+                
+        except Exception as e:
+            logging.error(f"Failed to inspect checkpoint {args.resume}. Error: {e}")
+            raise
+
+    logging.info(f"Starting training with {len(dataset)} videos...")
+    trainer.fit(model, dataloader, ckpt_path=ckpt_path)
 
 if __name__ == "__main__":
     main()

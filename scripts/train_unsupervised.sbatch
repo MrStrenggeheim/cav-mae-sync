@@ -25,7 +25,7 @@ nvidia-smi
 
 # 3. Paths
 PROJECT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync
-DATASET_JSON=/storage/slurm/schnackl/fakesync/data/fakeavceleb/FakeAVCeleb/preprocessed/dataset_info.json
+DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/dataset_info.json
 SAVE_PATH=${PROJECT_PATH}/checkpoints/unsupervised_train_$(date +%Y%m%d_%H%M%S)
 
 # 4. Training Configuration
@@ -48,11 +48,13 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --epochs ${EPOCHS} \
     --lr ${LR} \
     --save_path ${SAVE_PATH} \
+    --resume /storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_mae_sync.pth \
     --contrast_loss_weight 0.01 \
     --mae_loss_weight 1.0 \
     --num_workers 8 \
     --log_freq 10 \
     --cls_token \
-    --num_register_tokens 4
+    --num_register_tokens 8 \
+    # --fast_dev_run \
 
 echo "Training finished at $(date) with exit code $?"

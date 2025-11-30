@@ -4,9 +4,9 @@
 #SBATCH --error=slurm_logs_flo/audio_%A_%a.err
 #SBATCH --time=08:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=8G
-#SBATCH --array=0-1
+#SBATCH --array=0-7
 
 # 1. Force stdout/stderr to flush immediately
 export PYTHONUNBUFFERED=1
@@ -49,7 +49,7 @@ INPUT_CSV="/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_spl
 # TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/audio"
 TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/audio"
 SCRIPT_PATH="/storage/slurm/schnackl/fakesync/cav-mae-sync/preprocess/extract_audio_new.py"
-NUM_SHARDS=2  # Must match array count (0-15 is 16 items)
+NUM_SHARDS=8  # Must match array count (0-15 is 16 items)
 
 # Check if files exist
 if [ ! -f "$INPUT_CSV" ]; then
