@@ -616,7 +616,7 @@ class CAVMAE(nn.Module):
         return x_a, x_v
 
     # Make sure to update the forward_contrastive method in your CAVMAE class
-    def forward_contrastive(self, audio_rep, video_rep, bidirect_contrast=False, mode="train", inter_weight=0.5, intra_weight=0.5):
+    def forward_contrastive(self, audio_rep, video_rep, bidirect_contrast=False, mode="train", inter_weight=0.4, intra_weight=0.6):
         audio_rep = torch.nn.functional.normalize(audio_rep, dim=-1)
         video_rep = torch.nn.functional.normalize(video_rep, dim=-1)
 

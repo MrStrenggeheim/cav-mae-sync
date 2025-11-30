@@ -12,7 +12,7 @@ def get_args():
     parser = argparse.ArgumentParser(description="Calculate dataset normalization statistics")
     parser.add_argument("--dataset_json", type=str, required=True, help="Path to dataset JSON file")
     parser.add_argument("--num_workers", type=int, default=4, help="Number of data loading workers")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
+    parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
     parser.add_argument("--num_mel_bins", type=int, default=128, help="Number of mel bins")
     parser.add_argument("--target_length", type=int, default=1024, help="Target audio length")
     return parser.parse_args()

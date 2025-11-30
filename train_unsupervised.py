@@ -124,8 +124,8 @@ def get_args():
     
     # Audio Conf defaults
     parser.add_argument("--num_mel_bins", type=int, default=128, help="Number of mel bins")
-    parser.add_argument("--mean", type=float, default=-5.081, help="Dataset mean")
-    parser.add_argument("--std", type=float, default=4.4849, help="Dataset std")
+    parser.add_argument("--mean", type=float, default=-4.050048828125, help="Dataset mean")
+    parser.add_argument("--std", type=float, default=4.067018032073975, help="Dataset std")
     
     return parser.parse_args()
 
@@ -151,6 +151,9 @@ def main():
         'skip_norm': False,
         'noise': False
     }
+
+    logging.info("Audio Configuration:")
+    logging.info(audio_conf)
     
     dataset = AudiosetDataset(
         dataset_json_file=args.dataset_json,
@@ -174,7 +177,8 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.save_path,
         filename='cav-mae-{epoch:02d}-{train_loss:.2f}',
-        save_top_k=2,
+        save_top_k=1,
+        save_last=True,
         monitor='train_loss',
         mode='min'
     )

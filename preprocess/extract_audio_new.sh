@@ -28,15 +28,6 @@ source /storage/slurm/schnackl/fakesync/myVenv/.venv/bin/activate
 which python
 python --version
 
-# 4. Library Paths (Keep your SOX setup)
-# Define where you extracted the deb/binary
-MY_SOX_PATH="/home/stud/hunecke/sox"  # <--- Verify this path with 'ls' first!
-
-# Add to Library Path so the node finds libsox
-export LD_LIBRARY_PATH="$MY_SOX_PATH/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
-
-# Add to System Path so 'sox' command is found
-export PATH="$MY_SOX_PATH/usr/bin:$PATH"
 
 # DEBUG: Check if it actually works before running Python
 # echo "Debug: Testing Sox..."
