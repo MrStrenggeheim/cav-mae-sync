@@ -25,7 +25,7 @@ nvidia-smi
 
 # 3. Paths
 PROJECT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync
-DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/dataset_info.json
+DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/voxceleb2_dataset_split_without_fakeavceleb_train_dataset_info.json
 SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_$(date +%Y%m%d_%H%M%S)
 
 # 4. Training Configuration

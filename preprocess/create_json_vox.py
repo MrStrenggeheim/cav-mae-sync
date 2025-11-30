@@ -1,37 +1,42 @@
 #%%
 import pandas as pd
+import json
+import os
 
-CSV_PATH = "/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb_1percent.csv"
-DATA_PATH = "/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct"
+DATA_PATH = "/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed"
+CSV_PATHS = [
+    # "/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb.csv",
+    "/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb_1percent.csv",
+    "/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb_test.csv",
+    "/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb_train.csv"
+]
 
-# open csv
-csv = pd.read_csv(CSV_PATH)
-#%%
-csv.head(10)
-#%%
-data = []
 
-for idx, row in csv.iterrows():
-    input_f  = row["video_name"]
+def video_name_to_video_id(input_f):
     ext_len = len(input_f.split('/')[-1].split('.')[-1])
     video_id = "-".join(input_f.split('/')[-5:])[:-ext_len-1]
-    item = {
-        "video_id": video_id,
-        "wav": f"{DATA_PATH}/audio/{video_id}.wav",
-        "video_path": f"{DATA_PATH}/frames",
-        "labels": row["target"],
-    }
-    data.append(item)
+    return video_id
 
-import json
-output = {'data': data}
-with open(f"{DATA_PATH}/dataset_info.json", 'w') as f:
-    json.dump(output, f, indent=1)
-# %%
-# also create dumb csv with 
-#idx, mid=target, display_name=real/fake
-# target_csv = {"index": [0, 1], "mid": ["0", "1"], "display_name": ["real", "fake"]}
-# target_df = pd.DataFrame(target_csv)
-# target_df.to_csv(f"{DATA_PATH}/dataset_info.csv", index=False)
+def process_csv(csv_path):
+    print(f"Processing CSV: {csv_path}")
+    csv = pd.read_csv(csv_path)
+    data = []
 
-# %%
+    for idx, row in csv.iterrows():
+        input_f  = row["video_name"]
+        video_id = video_name_to_video_id(input_f)
+        item = {
+            "video_id": video_id,
+            "wav": f"{DATA_PATH}/audio/{video_id}.wav",
+            "video_path": f"{DATA_PATH}/frames",
+            "labels": row["target"],
+        }
+        data.append(item)
+
+    output = {'data': data}
+    json_file_name = os.path.basename(csv_path).replace('.csv', '_dataset_info.json')
+    with open(f"{DATA_PATH}/{json_file_name}", 'w') as f:
+        json.dump(output, f, indent=1)
+
+for csv_path in CSV_PATHS:
+    process_csv(csv_path)
