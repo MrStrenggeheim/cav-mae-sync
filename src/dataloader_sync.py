@@ -107,8 +107,12 @@ class AudiosetDataset(Dataset):
         else:
             print('not use noise augmentation')
 
-        self.index_dict = make_index_dict(label_csv)
-        self.label_num = len(self.index_dict)
+        if label_csv is not None:
+            self.index_dict = make_index_dict(label_csv)
+            self.label_num = len(self.index_dict)
+        else:
+            self.index_dict = {}
+            self.label_num = 0
         print('number of classes is {:d}'.format(self.label_num))
 
         self.target_length = self.audio_conf.get('target_length')
@@ -440,7 +444,7 @@ class AudiosetDataset(Dataset):
 
     def __len__(self):
         return self.num_samples
-    
+
     def get_error_counts(self):
         return self.failed_audio_loadings, self.failed_image_loadings
 
@@ -468,7 +472,7 @@ def train_collate_fn(batch):
     
     return fbanks, images, labels, video_ids, frame_indices
 
-# New function for unsupervised training collate
+
 def unsupervised_collate_fn(batch):
     fbanks, images, video_ids, frame_indices = zip(*batch)
     

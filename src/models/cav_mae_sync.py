@@ -657,6 +657,7 @@ class CAVMAE(nn.Module):
                     )
                     / total.shape[0]
                 )
+            return nce, c_acc, torch.tensor(0.0, device=total.device)
         elif mode == "unsupervised_train":
             n_samples = total.shape[0]
             f = self.total_frame
@@ -733,7 +734,7 @@ class CAVMAE(nn.Module):
                     preds_inter_v2a = torch.argmax(total.t(), dim=1)
                     inter_acc_v2a = (preds_inter_v2a == inter_targets).float().mean()
                     inter_acc = (inter_acc + inter_acc_v2a) / 2
-            return nce, (intra_acc, inter_acc)
+            return nce, intra_acc, inter_acc
 
         else:  # eval mode
             # For eval, we consider any match within the same video as correct
@@ -752,7 +753,7 @@ class CAVMAE(nn.Module):
             positive_mask = video_indices.unsqueeze(0) == video_indices.unsqueeze(1)
             nce = -torch.mean(torch.logsumexp(total * positive_mask, dim=1) - torch.logsumexp(total, dim=1))
 
-        return nce, c_acc
+            return nce, c_acc, torch.tensor(0.0, device=total.device)
 
     def forward_mae_loss(self, input, pred, mask, modality):
         if modality == "a":
@@ -856,18 +857,19 @@ class CAVMAE(nn.Module):
         # Contrastive loss calculation
         if contrast_loss_weight != 0:
             if not self.cls_token:
-                loss_c, c_acc = self.forward_contrastive(latent_c_a.mean(dim=1), latent_c_v.mean(dim=1), mode=mode)
+                loss_c, c_acc, inter_acc = self.forward_contrastive(latent_c_a.mean(dim=1), latent_c_v.mean(dim=1), mode=mode)
             else:
                 if self.global_local_losses:
-                    global_loss_c, global_c_acc = self.forward_contrastive(cls_a, cls_v, mode=mode)
-                    local_loss_c, local_c_acc = self.forward_contrastive(latent_c_a.mean(dim=1), latent_c_v.mean(dim=1), mode=mode)
+                    global_loss_c, global_c_acc, global_inter_acc = self.forward_contrastive(cls_a, cls_v, mode=mode)
+                    local_loss_c, local_c_acc, local_inter_acc = self.forward_contrastive(latent_c_a.mean(dim=1), latent_c_v.mean(dim=1), mode=mode)
                     loss_c = (global_loss_c + local_loss_c) / 2
                     c_acc = (local_c_acc + global_c_acc) / 2
+                    inter_acc = (global_inter_acc + local_inter_acc) / 2
                 else:
-                    loss_c, c_acc = self.forward_contrastive(cls_a, cls_v, mode=mode)
+                    loss_c, c_acc, inter_acc = self.forward_contrastive(cls_a, cls_v, mode=mode)
             loss_c = contrast_loss_weight * loss_c
         else:
-            loss_c, c_acc = torch.tensor(0.0, device=audio.device), torch.tensor(0.0, device=audio.device)
+            loss_c, c_acc, inter_acc = torch.tensor(0.0, device=audio.device), torch.tensor(0.0, device=audio.device), torch.tensor(0.0, device=audio.device)
 
         loss = loss_mae + loss_c
 
@@ -878,24 +880,25 @@ class CAVMAE(nn.Module):
 
         if self.cls_token:
             if self.global_local_losses:
-                return (
-                    loss,
-                    loss_mae,
-                    loss_mae_a,
-                    loss_mae_v,
-                    loss_c,
-                    mask_a,
-                    mask_v,
-                    c_acc,
-                    recon_a,
-                    recon_v,
-                    latent_c_a.mean(dim=1),
-                    latent_c_v.mean(dim=1),
-                    cls_a,
-                    cls_v,
-                    contrast_loss_weight * global_loss_c,
-                    contrast_loss_weight * local_loss_c,
-                )
+                return {
+                    'loss': loss,
+                    'loss_mae': loss_mae,
+                    'loss_mae_a': loss_mae_a,
+                    'loss_mae_v': loss_mae_v,
+                    'loss_c': loss_c,
+                    'mask_a': mask_a,
+                    'mask_v': mask_v,
+                    'c_acc': c_acc,
+                    'recon_a': recon_a,
+                    'recon_v': recon_v,
+                    'latent_c_a_mean': latent_c_a.mean(dim=1),
+                    'latent_c_v_mean': latent_c_v.mean(dim=1),
+                    'cls_a': cls_a,
+                    'cls_v': cls_v,
+                    'global_loss_c': contrast_loss_weight * global_loss_c,
+                    'local_loss_c': contrast_loss_weight * local_loss_c,
+                    'inter_acc': inter_acc,
+                }
             else:
                 cls_a = latent_c_a
                 cls_v = latent_c_v
@@ -903,20 +906,21 @@ class CAVMAE(nn.Module):
             cls_a = latent_c_a.mean(dim=1)
             cls_v = latent_c_v.mean(dim=1)
 
-        return (
-            loss,
-            loss_mae,
-            loss_mae_a,
-            loss_mae_v,
-            loss_c,
-            mask_a,
-            mask_v,
-            c_acc,
-            recon_a,
-            recon_v,
-            cls_a,
-            cls_v,
-        )
+        return {
+            'loss': loss,
+            'loss_mae': loss_mae,
+            'loss_mae_a': loss_mae_a,
+            'loss_mae_v': loss_mae_v,
+            'loss_c': loss_c,
+            'mask_a': mask_a,
+            'mask_v': mask_v,
+            'c_acc': c_acc,
+            'recon_a': recon_a,
+            'recon_v': recon_v,
+            'cls_a': cls_a,
+            'cls_v': cls_v,
+            'inter_acc': inter_acc,
+        }
 
     # used only for inpainting, ignore if inpainting is not of interest
     def forward_inpaint(
