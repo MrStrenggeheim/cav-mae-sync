@@ -4,12 +4,12 @@
 #SBATCH --error=slurm_logs_flo/extract_frames_%A_%a.err
 #SBATCH --time=08:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=8G
-#SBATCH --array=0-7  # 16 jobs total
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --array=0-1  # 16 jobs total
 
 # 1. Force stdout/stderr to flush immediately
-export PYTHONUNBUFFERED=1
+# export PYTHONUNBUFFERED=1
 
 # 2. Safety: Set a default for CPUs if Slurm doesn't provide it
 CPUS=${SLURM_CPUS_PER_TASK:-4}
@@ -35,7 +35,7 @@ TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/frames"
 # TARGET_DIR="/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/frames"
 SCRIPT_PATH="/storage/slurm/schnackl/fakesync/cav-mae-sync/preprocess/extract_video_frame_new.py"
 
-NUM_SHARDS=8  # Must match the count of --array (0-7 = 8)
+NUM_SHARDS=2  # Must match the count of --array (0-7 = 8)
 FRAMES_TO_EXTRACT=16
 
 echo "Starting Task ID: $SLURM_ARRAY_TASK_ID on $(hostname)"
