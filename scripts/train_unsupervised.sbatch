@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-gpu=4
 #SBATCH --gres=gpu:1,VRAM:64G
 #SBATCH --mem=128G
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --mail-type=END
 #SBATCH --output=/storage/slurm/schnackl/fakesync/slurm_logs_flo/slurm-cav-mae-sync-train-%j.out
 #SBATCH --error=/storage/slurm/schnackl/fakesync/slurm_logs_flo/slurm-cav-mae-sync-train-%j.err
@@ -26,8 +26,8 @@ nvidia-smi
 # 3. Paths
 PROJECT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync
 # DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/voxceleb2_dataset_split_without_fakeavceleb_train_dataset_info.json
-DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/dataset_info.json
-SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_$(date +%Y%m%d_%H%M%S)
+DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/voxceleb2_dataset_split_without_fakeavceleb_10percent_train_dataset_info.json
+SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_10_percent_$(date +%Y%m%d_%H%M%S)
 
 # 4. Training Configuration
 # Note: batch_size is number of videos. Effective batch size = batch_size * total_frame
