@@ -2,7 +2,7 @@
 #SBATCH --job-name="Eval CAV-MAE-Sync DeepFake"
 #SBATCH --nodes=1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --gres=gpu:1,VRAM:64G
+#SBATCH --gres=gpu:2,VRAM:8G
 #SBATCH --mem=128G
 #SBATCH --time=04:00:00
 #SBATCH --mail-type=END
@@ -26,14 +26,16 @@ nvidia-smi
 # 3. Paths
 PROJECT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync
 # TODO: Update this to the specific dataset json you want to evaluate on (e.g. test set)
-DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/voxceleb2_dataset_split_without_fakeavceleb_test_dataset_info.json
-DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/voxceleb2_dataset_split_without_fakeavceleb_1percent_dataset_info.json
+# DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/voxceleb2_dataset_split_without_fakeavceleb_test_dataset_info.json
+# DATASET_JSON=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed1pct/voxceleb2_dataset_split_without_fakeavceleb_1percent_dataset_info.json
+# eval on fakeavceleb:
+DATASET_JSON=/storage/slurm/schnackl/fakesync/data/fakeavceleb/FakeAVCeleb/preprocessed/dataset_info.json
 
 # TODO: Update this to your trained checkpoint path
 # Example: ${PROJECT_PATH}/checkpoints/unsupervised_train_20231027_120000/epoch=49-step=1000.ckpt
-CHECKPOINT_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_20251130_221754/cav-mae-epoch=00-train_loss=0.26.ckpt
+CHECKPOINT_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_10_percent_first/unsupervised_train_10_percent_20251202_194320/cav-mae-epoch=00-train_loss=0.67.ckpt
 
-OUTPUT_CSV=${PROJECT_PATH}/eval_results_$(date +%Y%m%d_%H%M%S).csv
+OUTPUT_CSV=${PROJECT_PATH}/outputs/checkpoints/unsupervised_10_percent_first/eval_results_$(date +%Y%m%d_%H%M%S).csv
 
 # 4. Evaluation Configuration
 # Batch size must be 1 for per-video scoring
