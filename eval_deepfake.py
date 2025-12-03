@@ -1,12 +1,10 @@
 import argparse
-import os
 import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from src.dataloader_sync import AudiosetDataset, unsupervised_collate_fn
 from train_unsupervised import CAVMAEModule
 import pandas as pd
-from tqdm import tqdm
 import logging
 
 def get_args():
@@ -28,62 +26,82 @@ def get_args():
     parser.add_argument("--mean", type=float, default=-5.081, help="Dataset mean")
     parser.add_argument("--std", type=float, default=4.4849, help="Dataset std")
     
+    # Evaluation config
+    parser.add_argument("--use_masking", action="store_true", default=True, 
+                        help="Use default masking ratios from checkpoint (default: True)")
+    parser.add_argument("--no_masking", dest="use_masking", action="store_false",
+                        help="Disable masking (set mask_ratio to 0)")
+    
     return parser.parse_args()
 
 class DeepFakeEvaluator(pl.LightningModule):
     
-    def __init__(self, model_module):
+    def __init__(self, model_module, use_masking=True):
         super().__init__()
         self.model_module = model_module
-        self.results = []
+        self.use_masking = use_masking
+        self.test_outputs = []
 
     def forward(self, fbanks, images):
-        return self.model_module(fbanks, images)
+        if self.use_masking:
+            # Use default mask ratios from checkpoint
+            return self.model_module(fbanks, images)
+        else:
+            # No masking - call underlying model directly with mask_ratio=0
+            return self.model_module.model(
+                fbanks, images,
+                mask_ratio_a=0.0,
+                mask_ratio_v=0.0,
+                mae_loss_weight=self.model_module.hparams.mae_loss_weight,
+                contrast_loss_weight=self.model_module.hparams.contrast_loss_weight,
+                mode='unsupervised_train'
+            )
 
-    def predict_step(self, batch, batch_idx):
+    def test_step(self, batch, batch_idx):
         fbanks, images, video_ids, frame_indices = batch
         
         outputs = self(fbanks, images)
         
-        loss = outputs['loss'].item()
-        loss_mae = outputs['loss_mae'].item()
-        loss_c = outputs['loss_c'].item()
-        intra_acc = outputs['c_acc'].item()
-        inter_acc = outputs['inter_acc'].item()
+        loss = outputs['loss']
+        loss_mae = outputs['loss_mae']
+        loss_c = outputs['loss_c']
+        intra_acc = outputs['c_acc']
+        inter_acc = outputs['inter_acc']
         
-        # Assuming batch_size=1, all frames belong to the same video.
-        # video_ids is a list of length (B*F).
-        if len(video_ids) > 0:
-            vid = video_ids[0]
-        else:
-            logging.warning(f"Empty video_ids in batch {batch_idx}")
-            vid = "unknown"
+        # Log metrics - Lightning handles step/epoch aggregation
+        self.log('eval_loss', loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=1)
+        self.log('eval_mae_loss', loss_mae, on_step=True, on_epoch=True, prog_bar=True, batch_size=1)
+        self.log('eval_contrast_loss', loss_c, on_step=True, on_epoch=True, batch_size=1)
+        self.log('eval_intra_acc', intra_acc, on_step=True, on_epoch=True, prog_bar=True, batch_size=1)
+        self.log('eval_inter_acc', inter_acc, on_step=True, on_epoch=True, prog_bar=True, batch_size=1)
         
-        return {
+        vid = video_ids[0] if len(video_ids) > 0 else "unknown"
+        
+        result = {
             'video_id': vid,
-            'loss': loss,
-            'loss_mae': loss_mae,
-            'loss_c': loss_c,
-            'intra_acc': intra_acc,
-            'inter_acc': inter_acc
+            'loss': loss.item(),
+            'loss_mae': loss_mae.item(),
+            'loss_c': loss_c.item(),
+            'intra_acc': intra_acc.item(),
+            'inter_acc': inter_acc.item()
         }
+        self.test_outputs.append(result)
+        return result
 
 def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     args = get_args()
     
     if args.batch_size != 1:
-        logging.warning("batch_size is not 1. Scores will be averaged over the batch, which might not be useful for individual video detection.")
-        logging.warning("Setting batch_size to 1 for evaluation.")
+        logging.warning("Setting batch_size to 1 for per-video evaluation.")
         args.batch_size = 1
 
-    # Dataset Configuration
     audio_conf = {
         'num_mel_bins': args.num_mel_bins,
         'mean': args.mean,
         'std': args.std,
         'target_length': args.target_length,
-        'mode': 'unsupervised_train', # Use this mode to get the same data loading behavior
+        'mode': 'unsupervised_train',
         'total_frame': args.total_frame,
         'im_res': args.im_res,
         'augmentation': False,
@@ -104,7 +122,7 @@ def main():
     
     dataloader = DataLoader(
         dataset,
-        batch_size=args.batch_size, # Should be 1
+        batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
         collate_fn=unsupervised_collate_fn,
@@ -112,28 +130,25 @@ def main():
     )
     
     logging.info(f"Loading checkpoint from {args.checkpoint_path}...")
-    
     model = CAVMAEModule.load_from_checkpoint(args.checkpoint_path)
     model.eval()
     
-    evaluator = DeepFakeEvaluator(model)
+    logging.info(f"Using masking: {args.use_masking}")
+    evaluator = DeepFakeEvaluator(model, use_masking=args.use_masking)
     
     trainer = pl.Trainer(
         accelerator='auto',
-        devices=1,
-        logger=False,
-        enable_checkpointing=False
+        devices='auto',
+        enable_checkpointing=False,
+        log_every_n_steps=10
     )
     
-    logging.info("Starting evaluation...")
-    predictions = trainer.predict(evaluator, dataloader)
+    logging.info(f"Evaluating {len(dataset)} samples...")
+    trainer.test(evaluator, dataloader)
     
-    # predictions is a list of dicts
-    df = pd.DataFrame(predictions)
-    
-    logging.info(f"Saving results to {args.output_csv}...")
+    df = pd.DataFrame(evaluator.test_outputs)
     df.to_csv(args.output_csv, index=False)
-    logging.info("Done.")
+    logging.info(f"Results saved to {args.output_csv}")
 
 if __name__ == "__main__":
     main()
