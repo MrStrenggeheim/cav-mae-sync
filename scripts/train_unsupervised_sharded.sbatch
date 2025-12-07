@@ -49,7 +49,7 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --sharded_dataset_dir ${SHARDED_DATASET_DIR} \
     --batch_size ${BATCH_SIZE} \
     --total_frame ${TOTAL_FRAME} \
-    --target_length 416 \
+    --target_length 42 \
     --epochs ${EPOCHS} \
     --warmup_epochs ${WARMUP_EPOCHS} \
     --lr ${LR} \
