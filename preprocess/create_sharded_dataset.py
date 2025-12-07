@@ -228,7 +228,8 @@ def main():
                })
     elif args.input_file.endswith('.csv'):
         df = pd.read_csv(args.input_file)
-        file_list = df.to_dict('records')
+        col_name = 'video_name' if 'video_name' in df.columns else 'video_path'
+        file_list = [{'video_path': row[col_name], 'labels': row.get('labels', None)} for _, row in df.iterrows()]
     else:
         raise ValueError("Unknown input file format")
     
