@@ -39,12 +39,14 @@ def process_single_video(args_tuple):
         # Open Video
         vidcap = cv2.VideoCapture(input_video_path)
         if not vidcap.isOpened():
+            print(f"FAILED TO OPEN: {input_video_path}")
             return # Skip broken videos silently
             
         fps = vidcap.get(cv2.CAP_PROP_FPS)
         
         # --- PRESERVE ORIGINAL LOGIC (Frame counting) ---
         total_frame_num = min(int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT)), int(fps * 10))
+        print(f"Video {video_id}: FPS={fps}, TotalFrames={total_frame_num}")
         
         for i in range(extract_frame_num):
             frame_idx = int(i * (total_frame_num/extract_frame_num))

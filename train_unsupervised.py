@@ -114,7 +114,8 @@ def get_args():
     parser = argparse.ArgumentParser(description="Train CAV-MAE Sync Unsupervised (Lightning)")
     
     # Dataset arguments
-    parser.add_argument("--dataset_json", type=str, required=True, help="Path to dataset JSON file")
+    parser.add_argument("--dataset_json", type=str, default=None, help="Path to dataset JSON file")
+    parser.add_argument("--sharded_dataset_dir", type=str, default=None, help="Path to sharded dataset directory (overrides dataset_json)")
     parser.add_argument("--label_csv", type=str, default=None, help="Path to label CSV file")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size (number of videos)")
     parser.add_argument("--num_workers", type=int, default=4, help="Number of data loading workers")
@@ -179,22 +180,39 @@ def main():
     logging.info("Audio Configuration:")
     logging.info(audio_conf)
     
-    dataset = AudiosetDataset(
-        dataset_json_file=args.dataset_json,
-        audio_conf=audio_conf,
-        label_csv=args.label_csv
-    )
-    
-    dataloader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        collate_fn=unsupervised_collate_fn,
-        pin_memory=True,  #  TODO: Check if this works
-        drop_last=True,
-        persistent_workers=True if args.num_workers > 0 else False
-    )
+    if args.sharded_dataset_dir:
+        from src.dataloader_sharded import ShardedAudiosetDataset
+        dataset = ShardedAudiosetDataset(
+            shard_dir=args.sharded_dataset_dir,
+            audio_conf=audio_conf
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            # shuffle=True, # Shuffling handled inside IterableDataset
+            num_workers=args.num_workers,
+            collate_fn=unsupervised_collate_fn,
+            pin_memory=True,
+            drop_last=True,
+            persistent_workers=True if args.num_workers > 0 else False
+        )
+    else:
+        dataset = AudiosetDataset(
+            dataset_json_file=args.dataset_json,
+            audio_conf=audio_conf,
+            label_csv=args.label_csv
+        )
+        
+        dataloader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=args.num_workers,
+            collate_fn=unsupervised_collate_fn,
+            pin_memory=True,  #  TODO: Check if this works
+            drop_last=True,
+            persistent_workers=True if args.num_workers > 0 else False
+        )
     
     model = CAVMAEModule(args)
 
