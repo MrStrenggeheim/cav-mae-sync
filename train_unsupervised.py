@@ -5,6 +5,8 @@ import torch
 import torch.optim as optim
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+from pytorch_lightning.loggers import TensorBoardLogger
+from datetime import timedelta
 from torch.utils.data import DataLoader
 from src.dataloader_sync import AudiosetDataset, unsupervised_collate_fn
 from src.models.cav_mae_sync import CAVMAE
@@ -143,6 +145,7 @@ def get_args():
     parser.add_argument("--log_freq", type=int, default=10, help="Logging frequency (steps)")
     parser.add_argument("--resume", type=str, default=None, help="Path to resume checkpoint (ckpt file)")
     parser.add_argument("--fast_dev_run", action="store_true", help="Run a quick development run")
+    parser.add_argument("--checkpoint_interval_hours", type=float, default=1.0, help="Save checkpoint every N hours")
     
     # Audio Conf defaults
     parser.add_argument("--num_mel_bins", type=int, default=128, help="Number of mel bins")
@@ -219,13 +222,21 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.save_path,
         filename='cav-mae-{epoch:02d}-{train_loss:.2f}',
-        save_top_k=1,
+        save_top_k=3,
         save_last=True,
         monitor='train_loss',
-        mode='min'
+        mode='min',
+        train_time_interval=timedelta(hours=args.checkpoint_interval_hours),
     )
     
     lr_monitor = LearningRateMonitor(logging_interval='step')
+    
+    # TensorBoard Logger
+    tb_logger = TensorBoardLogger(
+        save_dir=args.save_path,
+        name='tensorboard',
+        version=''
+    )
     
     trainer = pl.Trainer(
         max_epochs=args.epochs,
@@ -233,6 +244,7 @@ def main():
         devices="auto" if torch.cuda.is_available() else 1,
         precision="16-mixed" if torch.cuda.is_available() else 32,
         callbacks=[checkpoint_callback, lr_monitor],
+        logger=tb_logger,
         log_every_n_steps=args.log_freq,
         default_root_dir=args.save_path,
         fast_dev_run=args.fast_dev_run,

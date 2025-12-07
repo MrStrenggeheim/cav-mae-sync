@@ -1,9 +1,12 @@
 import argparse
+import os
 import torch
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 from src.dataloader_sync import AudiosetDataset, unsupervised_collate_fn
+from src.dataloader_sharded import ShardedAudiosetDataset
 from train_unsupervised import CAVMAEModule
+from pytorch_lightning.loggers import TensorBoardLogger
 import pandas as pd
 import logging
 
@@ -11,9 +14,11 @@ def get_args():
     parser = argparse.ArgumentParser(description="Evaluate CAV-MAE Sync for DeepFake Detection")
     
     # Dataset arguments
-    parser.add_argument("--dataset_json", type=str, required=True, help="Path to dataset JSON file")
+    parser.add_argument("--dataset_json", type=str, default=None, help="Path to dataset JSON file (legacy)")
+    parser.add_argument("--sharded_dataset_dir", type=str, default=None, help="Path to sharded dataset directory")
     parser.add_argument("--checkpoint_path", type=str, required=True, help="Path to model checkpoint")
     parser.add_argument("--output_csv", type=str, default="eval_results.csv", help="Path to save results CSV")
+    parser.add_argument("--output_dir", type=str, default="./eval_outputs", help="Output directory for logs")
     
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size (number of videos)")
     parser.add_argument("--num_workers", type=int, default=4, help="Number of data loading workers")
@@ -114,20 +119,37 @@ def main():
         'noise': False
     }
     
-    dataset = AudiosetDataset(
-        dataset_json_file=args.dataset_json,
-        audio_conf=audio_conf,
-        label_csv=None
-    )
-    
-    dataloader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        collate_fn=unsupervised_collate_fn,
-        pin_memory=True
-    )
+    # Choose dataset based on arguments
+    if args.sharded_dataset_dir:
+        logging.info(f"Using sharded dataset from {args.sharded_dataset_dir}")
+        dataset = ShardedAudiosetDataset(
+            shards_dir=args.sharded_dataset_dir,
+            audio_conf=audio_conf,
+            shuffle_shards=False
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            pin_memory=True
+        )
+    elif args.dataset_json:
+        logging.info(f"Using legacy dataset from {args.dataset_json}")
+        dataset = AudiosetDataset(
+            dataset_json_file=args.dataset_json,
+            audio_conf=audio_conf,
+            label_csv=None
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.num_workers,
+            collate_fn=unsupervised_collate_fn,
+            pin_memory=True
+        )
+    else:
+        raise ValueError("Must provide either --dataset_json or --sharded_dataset_dir")
     
     logging.info(f"Loading checkpoint from {args.checkpoint_path}...")
     model = CAVMAEModule.load_from_checkpoint(args.checkpoint_path)
@@ -136,10 +158,19 @@ def main():
     logging.info(f"Using masking: {args.use_masking}")
     evaluator = DeepFakeEvaluator(model, use_masking=args.use_masking)
     
+    # TensorBoard Logger for Eval
+    os.makedirs(args.output_dir, exist_ok=True)
+    tb_logger = TensorBoardLogger(
+        save_dir=args.output_dir,
+        name='tensorboard_eval',
+        version=''
+    )
+    
     trainer = pl.Trainer(
         accelerator='auto',
         devices='auto',
         enable_checkpointing=False,
+        logger=tb_logger,
         log_every_n_steps=10
     )
     
