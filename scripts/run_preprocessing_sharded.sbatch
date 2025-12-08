@@ -33,7 +33,7 @@ OUTPUT_DIR=/storage/slurm/hunecke/fakesync/data/voxceleb2/preprocessed/shards_tr
 NUM_SHARDS=200
 WORKERS=32
 # Legacy Parity Configs
-MAX_AUDIO_LENGTH=640
+MAX_AUDIO_LENGTH=1024
 TARGET_LENGTH=42
 TOTAL_FRAME=16
 IM_RES=224
