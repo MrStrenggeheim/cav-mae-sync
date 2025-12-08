@@ -1,6 +1,7 @@
 
 import os
 import argparse
+import sys
 import pandas as pd
 import numpy as np
 import torch
@@ -241,7 +242,11 @@ def main():
     
     os.makedirs(args.output_dir, exist_ok=True)
     
-    for shard_id in range(args.num_shards):
+    # Outer progress bar for shards (Slurm-compatible with mininterval)
+    num_actual_shards = min(args.num_shards, int(np.ceil(total_files / shard_size)))
+    pbar_shards = tqdm(range(num_actual_shards), desc="Shards", mininterval=10, file=sys.stdout)
+    
+    for shard_id in pbar_shards:
         start_idx = shard_id * shard_size
         end_idx = min(start_idx + shard_size, total_files)
         
@@ -252,10 +257,10 @@ def main():
         shard_output_path = os.path.join(args.output_dir, f"shard_{shard_id:04d}.pt")
         
         if os.path.exists(shard_output_path):
-             logging.info(f"Shard {shard_id} exists. Skipping.")
+             pbar_shards.set_postfix_str(f"Shard {shard_id} exists, skipping")
              continue
         
-        logging.info(f"Processing Shard {shard_id} ({len(shard_data)} files)...")
+        pbar_shards.set_postfix_str(f"Processing shard {shard_id} ({len(shard_data)} files)")
         
         task_args = []
         for item in shard_data:
@@ -265,15 +270,15 @@ def main():
             
         valid_samples = []
         with Pool(args.num_workers) as pool:
-            for res in tqdm(pool.imap(process_single_video, task_args), total=len(shard_data)):
+            for res in tqdm(pool.imap(process_single_video, task_args), total=len(shard_data), desc=f"Shard {shard_id}", leave=False, mininterval=5):
                 if res['valid']:
                     valid_samples.append(res)
         
         if len(valid_samples) > 0:
-            logging.info(f"Saving {len(valid_samples)} samples to {shard_output_path}")
+            tqdm.write(f"Saving {len(valid_samples)} samples to {shard_output_path}")
             torch.save(valid_samples, shard_output_path)
         else:
-            logging.warning(f"No valid samples for shard {shard_id}!")
+            tqdm.write(f"WARNING: No valid samples for shard {shard_id}!")
 
     # Save metadata
     metadata = {
