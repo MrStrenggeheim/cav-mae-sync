@@ -193,7 +193,7 @@ def main():
             dataset,
             batch_size=args.batch_size,
             # shuffle=True, # Shuffling handled inside IterableDataset
-            num_workers=args.num_workers,
+            num_workers=os.cpu_count(),
             collate_fn=unsupervised_collate_fn,
             pin_memory=True,
             drop_last=True,
