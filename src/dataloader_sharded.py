@@ -57,53 +57,81 @@ class ShardedAudiosetDataset(IterableDataset):
                 self.normalize
             ])
 
-    def map_frame_to_spectrogram(self, frame_index, num_frames, spectrogram_length, target_length):
+    def slice_fbank_at_timestamp(self, full_fbank, fbank_length, timestamp_ms, target_length):
         """
-        Maps a frame index to a corresponding segment in the spectrogram.
+        Slice fbank centered at timestamp with edge padding.
+        fbank frame_shift = 10ms, so timestamp_ms / 10 = center frame index.
         """
-        frame_position = int(round(frame_index * spectrogram_length / num_frames))
+        FRAME_SHIFT_MS = 10
+        center_frame = int(timestamp_ms / FRAME_SHIFT_MS)
+        half_len = target_length // 2
         
-        start = max(0, frame_position - target_length // 2)
+        start = center_frame - half_len
         end = start + target_length
         
-        if end > spectrogram_length:
-            end = spectrogram_length
-            start = max(0, end - target_length)
+        # Clamp to actual fbank length (not padded storage length)
+        actual_length = fbank_length
         
-        return (start, end)
+        # Compute padding needed at each edge
+        pad_left = 0
+        pad_right = 0
+        
+        if start < 0:
+            pad_left = -start
+            start = 0
+        if end > actual_length:
+            pad_right = end - actual_length
+            end = actual_length
+        
+        # Extract segment
+        segment = full_fbank[start:end, :]
+        
+        # Pad if needed (at edges of audio)
+        if pad_left > 0 or pad_right > 0:
+            segment = torch.nn.functional.pad(segment, (0, 0, pad_left, pad_right))
+        
+        return segment
 
     def flatten_dataset(self, data):
-        # Data is dict: {'video_id', 'fbank', 'images', 'frame_indices', ...}
-        # fbank: Tensor [Time, 128] float16 (Full Spectrogram)
+        # Data is dict: {'video_id', 'fbank', 'fbank_length', 'images', 'frame_indices', 'frame_timestamps_ms', ...}
+        # fbank: Tensor [max_audio_length, 128] float16 (padded)
+        # fbank_length: int (actual length before padding)
         # images: List[bytes] (JPEG)
         
         full_fbank = data['fbank'].float()
+        fbank_length = data.get('fbank_length', full_fbank.shape[0])  # Fallback for old shards
         images_list = data['images']
+        frame_timestamps_ms = data.get('frame_timestamps_ms', None)
         frame_indices = data['frame_indices']
         
         fbanks = []
         images = []
         
-        num_frames_conf = self.audio_conf.get('total_frame', 16)
         target_length = self.target_length
-        spectrogram_length = full_fbank.shape[0]
         
         for i, frame_idx in enumerate(frame_indices):
-            start, end = self.map_frame_to_spectrogram(
-                frame_index=i, 
-                num_frames=num_frames_conf,
-                spectrogram_length=spectrogram_length,
-                target_length=target_length
-            )
-            
-            fbank = full_fbank[start:end, :]
-            
-            # Pad if needed
-            n_frames = fbank.shape[0]
-            p = target_length - n_frames
-            if p > 0:
-                m = torch.nn.ZeroPad2d((0, 0, 0, p))
-                fbank = m(fbank.unsqueeze(0).unsqueeze(0)).squeeze(0).squeeze(0)
+            # Use timestamp-based slicing if available, else fallback to old method
+            if frame_timestamps_ms is not None:
+                timestamp_ms = frame_timestamps_ms[i]
+                fbank = self.slice_fbank_at_timestamp(
+                    full_fbank, fbank_length, timestamp_ms, target_length
+                )
+            else:
+                # Legacy fallback for old shards
+                logging.warning("Using legacy fallback for old shards")
+                num_frames_conf = self.audio_conf.get('total_frame', 16)
+                spectrogram_length = fbank_length
+                frame_position = int(round(i * spectrogram_length / num_frames_conf))
+                start = max(0, frame_position - target_length // 2)
+                end = start + target_length
+                if end > spectrogram_length:
+                    end = spectrogram_length
+                    start = max(0, end - target_length)
+                fbank = full_fbank[start:end, :]
+                # Pad if needed
+                if fbank.shape[0] < target_length:
+                    pad_len = target_length - fbank.shape[0]
+                    fbank = torch.nn.functional.pad(fbank, (0, 0, 0, pad_len))
             
             # Normalize Audio
             if not self.skip_norm:

@@ -123,18 +123,20 @@ def process_single_video(args):
                            use_energy=False, window_type='hanning', 
                            num_mel_bins=num_mel_bins, dither=0.0, frame_shift=10)
         
-        # Enforce strict frame length (1024)
+        # Store fbank up to max_audio_length
         n_frames = full_fbank.shape[0]
-        p = max_audio_length - n_frames
-
-        if p > 0:
-            m = torch.nn.ZeroPad2d((0, 0, 0, p))
-            full_fbank = m(full_fbank)
-        elif p < 0:
-            full_fbank = full_fbank[0:max_audio_length, :]
+        fbank_length = min(n_frames, max_audio_length)
         
-        # Store processed fbank as FLOAT16
+        if n_frames > max_audio_length:
+            full_fbank = full_fbank[:max_audio_length, :]
+        elif n_frames < max_audio_length:
+            # Pad to max_audio_length for storage efficiency
+            pad_len = max_audio_length - n_frames
+            full_fbank = torch.nn.functional.pad(full_fbank, (0, 0, 0, pad_len))
+        
+        # Store processed fbank as FLOAT16 and actual length
         result['fbank'] = full_fbank.half()
+        result['fbank_length'] = fbank_length
                            
     except Exception as e:
          logging.warning(f"Audio processing error for {video_id}: {e}")
@@ -148,10 +150,12 @@ def process_single_video(args):
             return result
             
         fps = vidcap.get(cv2.CAP_PROP_FPS)
-        total_frame_num = min(int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT)), int(fps * 10))
+        total_video_frames = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_duration_ms = (total_video_frames / fps) * 1000 if fps > 0 else 0
         
         images_bytes = []
         frame_indices = []
+        frame_timestamps_ms = []
         
         pil_transform = T.Compose([
              T.Resize(im_res),
@@ -159,9 +163,10 @@ def process_single_video(args):
         ])
         
         for i in range(num_frames):
-            frame_idx = int(i * (total_frame_num/num_frames))
+            frame_idx = int(i * (total_video_frames / num_frames)) if total_video_frames > 0 else 0
+            timestamp_ms = (frame_idx / fps) * 1000 if fps > 0 else 0
             
-            vidcap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)  # We initially had frame_idx - 1 here, but this is not correct
+            vidcap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = vidcap.read()
             
             if ret:
@@ -177,6 +182,7 @@ def process_single_video(args):
                 images_bytes.append(img_byte_arr.getvalue())
                 
                 frame_indices.append(frame_idx)
+                frame_timestamps_ms.append(timestamp_ms)
             else:
                  logging.warning(f"Could not read frame {frame_idx} for {video_id}")
                  # Backup: zero image
@@ -185,15 +191,19 @@ def process_single_video(args):
                  black_im.save(img_byte_arr, format='JPEG')
                  images_bytes.append(img_byte_arr.getvalue())
                  
-                 frame_indices.append(frame_idx) 
+                 frame_indices.append(frame_idx)
+                 frame_timestamps_ms.append(timestamp_ms)
                  vidcap.release()
                  return result
 
         vidcap.release()
         
-        # Store LIST of bytes
+        # Store all metadata
         result['images'] = images_bytes
         result['frame_indices'] = frame_indices
+        result['frame_timestamps_ms'] = frame_timestamps_ms
+        result['video_fps'] = fps
+        result['video_duration_ms'] = video_duration_ms
         result['valid'] = True
         
     except Exception as e:
@@ -221,7 +231,7 @@ def main():
     parser.add_argument("--total_frame", type=int, default=16, help="Frames to extract")
     parser.add_argument("--im_res", type=int, default=224, help="Image resolution")
     parser.add_argument("--target_length", type=int, default=416, help="Target audio length (for reference/slicing in dataloader)")
-    parser.add_argument("--max_audio_length", type=int, default=1024, help="Max audio length to store (legacy truncation/pad limit)")
+    parser.add_argument("--max_audio_length", type=int, default=1024, help="Max audio fbank length (frames). Filters videos longer than ~20s")
     parser.add_argument("--num_mel_bins", type=int, default=128, help="Mel bins")
     
     args = parser.parse_args()
