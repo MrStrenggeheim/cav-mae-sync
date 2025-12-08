@@ -207,7 +207,17 @@ def main():
     parser.add_argument("--input_file", type=str, required=True, help="Input CSV/JSON")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for shards")
     parser.add_argument("--num_shards", type=int, default=100, help="Target number of shards")
-    parser.add_argument("--num_workers", type=int, default=os.cpu_count() or 1, help="Number of worker processes")
+    
+    # Try to determine safe default workers respecting affinity (Slurm friendly)
+    try:
+        default_workers = len(os.sched_getaffinity(0))
+    except (AttributeError, NotImplementedError):
+        if os.environ.get("SLURM_CPUS_PER_TASK"):
+            default_workers = int(os.environ.get("SLURM_CPUS_PER_TASK"))
+        else:
+            default_workers = os.cpu_count() or 1
+            
+    parser.add_argument("--num_workers", type=int, default=default_workers, help="Number of worker processes")
     parser.add_argument("--total_frame", type=int, default=16, help="Frames to extract")
     parser.add_argument("--im_res", type=int, default=224, help="Image resolution")
     parser.add_argument("--target_length", type=int, default=416, help="Target audio length (for reference/slicing in dataloader)")

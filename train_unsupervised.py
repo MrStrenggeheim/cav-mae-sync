@@ -120,7 +120,16 @@ def get_args():
     parser.add_argument("--sharded_dataset_dir", type=str, default=None, help="Path to sharded dataset directory (overrides dataset_json)")
     parser.add_argument("--label_csv", type=str, default=None, help="Path to label CSV file")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size (number of videos)")
-    parser.add_argument("--num_workers", type=int, default=4, help="Number of data loading workers")
+    # Try to determine safe default workers respecting affinity (Slurm friendly)
+    try:
+        default_workers = len(os.sched_getaffinity(0))
+    except (AttributeError, NotImplementedError):
+        if os.environ.get("SLURM_CPUS_PER_TASK"):
+            default_workers = int(os.environ.get("SLURM_CPUS_PER_TASK"))
+        else:
+            default_workers = os.cpu_count() or 4
+        
+    parser.add_argument("--num_workers", type=int, default=default_workers, help="Number of data loading workers")
     parser.add_argument("--total_frame", type=int, default=16, help="Number of frames per video")
     parser.add_argument("--target_length", type=int, default=416, help="Target audio length")
     parser.add_argument("--im_res", type=int, default=224, help="Image resolution")
@@ -193,7 +202,7 @@ def main():
             dataset,
             batch_size=args.batch_size,
             # shuffle=True, # Shuffling handled inside IterableDataset
-            num_workers=os.cpu_count(),
+            num_workers=args.num_workers,
             collate_fn=unsupervised_collate_fn,
             pin_memory=True,
             drop_last=True,
