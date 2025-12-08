@@ -3,12 +3,12 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
+#SBATCH --gres=gpu:0
 #SBATCH --mem=128G
 #SBATCH --time=24:00:00
 #SBATCH --mail-type=END
 #SBATCH --output=/storage/slurm/schnackl/fakesync/slurm_logs_flo/slurm-cav-mae-sync-preprocess-%j.out
 #SBATCH --error=/storage/slurm/schnackl/fakesync/slurm_logs_flo/slurm-cav-mae-sync-preprocess-%j.err
-#SBATCH --partition=batch
 
 # 1. Force stdout/stderr to flush immediately
 export PYTHONUNBUFFERED=1
@@ -26,8 +26,8 @@ echo "Running python version $(python3 --version) from $(which python)"
 # 3. Paths
 PROJECT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync
 # Adjusted input/output for likely cluster location, user can check
-INPUT_FILE=${PROJECT_PATH}/datafiles/all_unsupervised.csv
-OUTPUT_DIR=/storage/slurm/schnackl/fakesync/data/voxceleb2/preprocessed/shards_train_v2
+INPUT_FILE=/storage/slurm/schnackl/fakesync/data/voxceleb2/voxceleb2_dataset_split_without_fakeavceleb_train.csv
+OUTPUT_DIR=/storage/slurm/hunecke/fakesync/data/voxceleb2/preprocessed/shards_train
 
 # 4. Configuration
 NUM_SHARDS=200
