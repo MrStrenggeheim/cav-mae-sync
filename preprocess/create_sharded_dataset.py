@@ -151,7 +151,15 @@ def process_single_video(args):
             
         fps = vidcap.get(cv2.CAP_PROP_FPS)
         total_video_frames = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
-        video_duration_ms = (total_video_frames / fps) * 1000 if fps > 0 else 0
+        
+        # Limit video sampling to match max_audio_length
+        # max_audio_length is in fbank frames (10ms each), so max_audio_length * 10 = max_ms
+        max_video_duration_ms = max_audio_length * 10  # e.g., 1024 * 10 = 10240ms
+        max_video_frames = int((max_video_duration_ms / 1000) * fps) if fps > 0 else total_video_frames
+        
+        # Use the smaller of actual video length or max allowed
+        usable_video_frames = min(total_video_frames, max_video_frames)
+        video_duration_ms = (usable_video_frames / fps) * 1000 if fps > 0 else 0
         
         images_bytes = []
         frame_indices = []
@@ -163,7 +171,8 @@ def process_single_video(args):
         ])
         
         for i in range(num_frames):
-            frame_idx = int(i * (total_video_frames / num_frames)) if total_video_frames > 0 else 0
+            # Sample frames uniformly within the USABLE portion (respecting max_audio_length)
+            frame_idx = int(i * (usable_video_frames / num_frames)) if usable_video_frames > 0 else 0
             timestamp_ms = (frame_idx / fps) * 1000 if fps > 0 else 0
             
             vidcap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
