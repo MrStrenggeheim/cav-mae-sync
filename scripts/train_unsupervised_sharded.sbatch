@@ -45,11 +45,14 @@ echo "Save Path: ${SAVE_PATH}"
 
 # 5. Run Training
 # Note: removed --dataset_json and added --sharded_dataset_dir
+# Note: --contrastive_heads is NOT used because the pretrained model (cav_mae_sync.pth) 
+#       was trained without contrastive heads. Using them would create architecture mismatch.
 python3 ${PROJECT_PATH}/train_unsupervised.py \
     --sharded_dataset_dir ${SHARDED_DATASET_DIR} \
     --batch_size ${BATCH_SIZE} \
     --total_frame ${TOTAL_FRAME} \
-    --target_length 42 \
+    --target_length 48 \
+    --audio_length 48 \
     --epochs ${EPOCHS} \
     --warmup_epochs ${WARMUP_EPOCHS} \
     --lr ${LR} \

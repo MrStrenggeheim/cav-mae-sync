@@ -34,7 +34,7 @@ class ShardedAudiosetDataset(IterableDataset):
         self.norm_mean = audio_conf.get('mean')
         self.norm_std = audio_conf.get('std')
         self.skip_norm = audio_conf.get('skip_norm', False)
-        self.target_length = audio_conf.get('target_length', 416)
+        self.target_length = audio_conf.get('target_length', 48)
         
         # Standard ImageNet normalization
         self.normalize = T.Normalize(
@@ -56,6 +56,21 @@ class ShardedAudiosetDataset(IterableDataset):
                 T.ToTensor(),
                 self.normalize
             ])
+        
+        # Compute approximate length by reading first shard and multiplying
+        # (assumes all shards have roughly equal size)
+        self._total_samples = 0
+        if self.shards:
+            try:
+                first_shard = torch.load(self.shards[0], weights_only=False)
+                samples_per_shard = len(first_shard)
+                self._total_samples = samples_per_shard * len(self.shards)
+            except Exception:
+                pass
+        logging.info(f"Estimated total samples in dataset: {self._total_samples}")
+    
+    def __len__(self):
+        return self._total_samples
 
     def slice_fbank_at_timestamp(self, full_fbank, fbank_length, timestamp_ms, target_length):
         """
