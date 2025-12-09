@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name="Train CAV-MAE-Sync Sharded"
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=8
-#SBATCH --gres=VRAM:32G
+#SBATCH --cpus-per-task=5
+#SBATCH --gres=gpu:a40:1
 #SBATCH --mem=64G
 #SBATCH --time=48:00:00
 #SBATCH --mail-type=END
@@ -32,7 +32,7 @@ SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_$(date 
 # With sharded dataset and IterableDataset, BATCH_SIZE is per-worker batch size if we aren't careful, 
 # but PyTorch DataLoader usually treats batch_size as global batch size or per-worker depending on distributed.
 # In single-node non-DDP, standard DataLoader batch_size is total batch size.
-BATCH_SIZE=8
+BATCH_SIZE=12
 TOTAL_FRAME=16
 EPOCHS=10
 WARMUP_EPOCHS=1
