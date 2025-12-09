@@ -131,11 +131,11 @@ def get_args():
         
     parser.add_argument("--num_workers", type=int, default=default_workers, help="Number of data loading workers")
     parser.add_argument("--total_frame", type=int, default=16, help="Number of frames per video")
-    parser.add_argument("--target_length", type=int, default=416, help="Target audio length")
+    parser.add_argument("--target_length", type=int, default=48, help="Target audio length (must be divisible by 16)")
     parser.add_argument("--im_res", type=int, default=224, help="Image resolution")
     
     # Model arguments
-    parser.add_argument("--audio_length", type=int, default=416, help="Audio length for model")
+    parser.add_argument("--audio_length", type=int, default=48, help="Audio length for model (must match target_length, divisible by 16)")
     parser.add_argument("--embed_dim", type=int, default=768, help="Embedding dimension")
     parser.add_argument("--mask_ratio_a", type=float, default=0.75, help="Audio mask ratio")
     parser.add_argument("--mask_ratio_v", type=float, default=0.75, help="Video mask ratio")
@@ -289,7 +289,11 @@ def main():
             logging.error(f"Failed to inspect checkpoint {args.resume}. Error: {e}")
             raise
 
-    logging.info(f"Starting training with {len(dataset)} videos...")
+    try:
+        num_samples = len(dataset)
+    except TypeError:
+        num_samples = "unknown"
+    logging.info(f"Starting training with {num_samples} videos...")
     trainer.fit(model, dataloader, ckpt_path=ckpt_path)
 
 if __name__ == "__main__":
