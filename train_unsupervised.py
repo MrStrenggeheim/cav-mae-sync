@@ -276,13 +276,108 @@ def main():
                 # Remove 'module.' prefix if present
                 clean_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
                 
-                # Load into appropriate part of the model
+                # Determine target model and key prefix
                 if any(k.startswith('model.') for k in clean_state_dict):
-                     msg = model.load_state_dict(clean_state_dict, strict=False)
+                    target_model = model
+                    key_prefix = 'model.'
                 else:
-                     msg = model.model.load_state_dict(clean_state_dict, strict=False)
+                    target_model = model.model
+                    key_prefix = ''
+                
+                # Audio-length dependent parameters that may have shape mismatch
+                # These depend on num_patches_a = int((audio_length / 16) * (128 / 16))
+                audio_length_dependent_keys = [
+                    'pos_embed_a',
+                    'decoder_pos_embed_a',
+                ]
+                
+                # Check for shape mismatches and filter out incompatible weights
+                filtered_state_dict = {}
+                skipped_keys = []
+                
+                for key, value in clean_state_dict.items():
+                    # Get the corresponding key in target model
+                    model_key = key.replace(key_prefix, '') if key_prefix and key.startswith(key_prefix) else key
+                    full_key = f"{key_prefix}{model_key}" if key_prefix else model_key
+                    
+                    # Check if this is an audio-length dependent key
+                    is_audio_dependent = any(dep_key in key for dep_key in audio_length_dependent_keys)
+                    
+                    if is_audio_dependent:
+                        # Get expected shape from current model
+                        try:
+                            if key_prefix:
+                                expected_param = target_model.state_dict().get(key)
+                            else:
+                                expected_param = target_model.state_dict().get(key)
+                            
+                            if expected_param is not None and expected_param.shape != value.shape:
+                                logging.warning(
+                                    f"Shape mismatch for '{key}': "
+                                    f"checkpoint has {list(value.shape)}, "
+                                    f"model expects {list(expected_param.shape)}. "
+                                    f"This weight will be randomly initialized."
+                                )
+                                skipped_keys.append(key)
+                                continue
+                        except Exception:
+                            pass
+                    
+                    filtered_state_dict[key] = value
+                
+                if skipped_keys:
+                    logging.warning(
+                        f"Skipped {len(skipped_keys)} audio-length dependent weights due to shape mismatch: "
+                        f"{skipped_keys}. These will be reinitialized with sin-cos positional encoding."
+                    )
+                
+                # Load filtered weights
+                if key_prefix:
+                    msg = target_model.load_state_dict(filtered_state_dict, strict=False)
+                else:
+                    msg = target_model.load_state_dict(filtered_state_dict, strict=False)
                 
                 logging.info(f"Weights loaded manually. Message: {msg}")
+                
+                # Reinitialize skipped positional embeddings with sin-cos encoding
+                if skipped_keys:
+                    from src.models.pos_embed import get_2d_sincos_pos_embed
+                    import numpy as np
+                    
+                    # Get the actual CAVMAE model (unwrap from Lightning module if needed)
+                    cavmae_model = target_model.model if hasattr(target_model, 'model') else target_model
+                    
+                    for key in skipped_keys:
+                        if 'pos_embed_a' in key and 'decoder' not in key:
+                            # Encoder audio positional embedding
+                            embed_dim = cavmae_model.pos_embed_a.shape[-1]
+                            num_patches = cavmae_model.patch_embed_a.num_patches
+                            pos_embed = get_2d_sincos_pos_embed(
+                                embed_dim,
+                                8,  # frequency dimension (128 / 16)
+                                int(num_patches / 8),  # time dimension
+                                cls_token=False
+                            )
+                            cavmae_model.pos_embed_a.data.copy_(
+                                torch.from_numpy(pos_embed).float().unsqueeze(0)
+                            )
+                            logging.info(f"Reinitialized '{key}' with sin-cos positional encoding (shape: {cavmae_model.pos_embed_a.shape})")
+                            
+                        elif 'decoder_pos_embed_a' in key:
+                            # Decoder audio positional embedding
+                            embed_dim = cavmae_model.decoder_pos_embed_a.shape[-1]
+                            num_patches = cavmae_model.patch_embed_a.num_patches
+                            pos_embed = get_2d_sincos_pos_embed(
+                                embed_dim,
+                                8,  # frequency dimension
+                                int(num_patches / 8),  # time dimension
+                                cls_token=False
+                            )
+                            cavmae_model.decoder_pos_embed_a.data.copy_(
+                                torch.from_numpy(pos_embed).float().unsqueeze(0)
+                            )
+                            logging.info(f"Reinitialized '{key}' with sin-cos positional encoding (shape: {cavmae_model.decoder_pos_embed_a.shape})")
+                
                 ckpt_path = None # Do not resume trainer state
                 
         except Exception as e:
