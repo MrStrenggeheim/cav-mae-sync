@@ -55,11 +55,12 @@ class CAVMAEModule(pl.LightningModule):
         inter_acc = outputs['inter_acc']
         
         # Logging
-        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train_mae_loss', loss_mae, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train_contrast_loss', loss_c, on_step=True, on_epoch=True, logger=True)
-        self.log('train_intra_acc', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train_inter_acc', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train_loss_total', loss, on_step=True, on_epoch=True, logger=False) # For checkpoint filename
+        self.log('train/loss/mae', loss_mae, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/loss/contrast', loss_c, on_step=True, on_epoch=True, logger=True)
+        self.log('train/acc/intra', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/acc/inter', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
         return loss
 
@@ -76,11 +77,11 @@ class CAVMAEModule(pl.LightningModule):
         inter_acc = outputs['inter_acc']
         
         # Logging
-        self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('test_mae_loss', loss_mae, on_step=True, on_epoch=True, logger=True)
-        self.log('test_contrast_loss', loss_c, on_step=True, on_epoch=True, logger=True)
-        self.log('test_intra_acc', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('test_inter_acc', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('test/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('test/loss/mae', loss_mae, on_step=True, on_epoch=True, logger=True)
+        self.log('test/loss/contrast', loss_c, on_step=True, on_epoch=True, logger=True)
+        self.log('test/acc/intra', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('test/acc/inter', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
         return loss
 
@@ -230,10 +231,10 @@ def main():
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.save_path,
-        filename='cav-mae-{epoch:02d}-{train_loss:.2f}',
+        filename='cav-mae-{epoch:02d}-{train_loss_total:.2f}',
         save_top_k=3,
         save_last=True,
-        monitor='train_loss',
+        monitor='train/loss/total',
         mode='min',
         train_time_interval=timedelta(hours=args.checkpoint_interval_hours),
     )
