@@ -10,6 +10,7 @@ from datetime import timedelta
 from torch.utils.data import DataLoader
 from src.dataloader_sync import AudiosetDataset, unsupervised_collate_fn
 from src.models.cav_mae_sync import CAVMAE
+from src.fakesync_config import FakeSyncConfig
 
 class CAVMAEModule(pl.LightningModule):
     def __init__(self, args):
@@ -180,25 +181,12 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     args = get_args()
     
-    # Dataset Configuration
-    audio_conf = {
-        'num_mel_bins': args.num_mel_bins,
-        'mean': args.mean,
-        'std': args.std,
-        'target_length': args.target_length,
-        'mode': 'unsupervised_train',
-        'total_frame': args.total_frame,
-        'im_res': args.im_res,
-        'augmentation': True,
-        'label_smooth': 0.0,
-        'freqm': 0,
-        'timem': 0,
-        'mixup': 0,
-        'dataset': 'custom',
-        'skip_norm': False,
-        'noise': False
-    }
-
+    # Validate configuration (will raise ValueError if invalid)
+    config = FakeSyncConfig.from_args(args)
+    logging.info("Configuration validated successfully")
+    
+    # Dataset Configuration (generated from validated config)
+    audio_conf = config.to_audio_conf()
     logging.info("Audio Configuration:")
     logging.info(audio_conf)
     
