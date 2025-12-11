@@ -616,14 +616,14 @@ class CAVMAE(nn.Module):
         return x_a, x_v
 
     # Make sure to update the forward_contrastive method in your CAVMAE class
-    def forward_contrastive(self, audio_rep, video_rep, bidirect_contrast=False, mode="train", inter_weight=0.4, intra_weight=0.6):
+    def forward_contrastive(self, audio_rep, video_rep, mode="train", contrast_bidirect=False, contrast_inter_weight=0.4, contrast_intra_weight=0.6):
         audio_rep = torch.nn.functional.normalize(audio_rep, dim=-1)
         video_rep = torch.nn.functional.normalize(video_rep, dim=-1)
 
         total = torch.mm(audio_rep, torch.transpose(video_rep, 0, 1)) / 0.05  # tau
 
         if mode == "train":
-            if bidirect_contrast:
+            if contrast_bidirect:
                 nce_1 = -torch.mean(torch.diag(torch.nn.functional.log_softmax(total, dim=0)))
                 nce_2 = -torch.mean(torch.diag(torch.nn.functional.log_softmax(total.t(), dim=0)))
                 c_acc_1 = (
@@ -676,7 +676,7 @@ class CAVMAE(nn.Module):
             
             intra_targets = torch.arange(f, device=total.device).repeat(b) # (B*F)
             
-            if bidirect_contrast:
+            if contrast_bidirect:
                 loss_intra_a2v = torch.nn.functional.cross_entropy(intra_logits, intra_targets)
                 
                 total_t_view = total.t().view(b, f, b, f)
@@ -701,7 +701,7 @@ class CAVMAE(nn.Module):
             
             inter_targets = torch.arange(n_samples, device=total.device)
             
-            if bidirect_contrast:
+            if contrast_bidirect:
                 loss_inter_a2v = torch.nn.functional.cross_entropy(total, inter_targets)
                 
                 # For V->A, we use total.t(). 
@@ -713,7 +713,7 @@ class CAVMAE(nn.Module):
             else:
                 loss_inter = torch.nn.functional.cross_entropy(total, inter_targets)
                 
-            nce = intra_weight * loss_intra + inter_weight * loss_inter
+            nce = contrast_intra_weight * loss_intra + contrast_inter_weight * loss_inter
             
             # Calculate Accuracy
             with torch.no_grad():
@@ -721,7 +721,7 @@ class CAVMAE(nn.Module):
                 preds = torch.argmax(intra_logits, dim=1)
                 intra_acc = (preds == intra_targets).float().mean()
                 
-                if bidirect_contrast and intra_logits_v2a is not None:
+                if contrast_bidirect and intra_logits_v2a is not None:
                     preds_v2a = torch.argmax(intra_logits_v2a, dim=1)
                     intra_acc_v2a = (preds_v2a == intra_targets).float().mean()
                     intra_acc = (intra_acc + intra_acc_v2a) / 2
@@ -730,7 +730,7 @@ class CAVMAE(nn.Module):
                 preds_inter = torch.argmax(total, dim=1)
                 inter_acc = (preds_inter == inter_targets).float().mean()
                 
-                if bidirect_contrast:
+                if contrast_bidirect:
                     preds_inter_v2a = torch.argmax(total.t(), dim=1)
                     inter_acc_v2a = (preds_inter_v2a == inter_targets).float().mean()
                     inter_acc = (inter_acc + inter_acc_v2a) / 2

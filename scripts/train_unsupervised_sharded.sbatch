@@ -59,10 +59,13 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --save_path ${SAVE_PATH} \
     --resume /storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_mae_sync.pth \
     --contrast_loss_weight 0.1 \
+    --contrast_inter_weight 0.4 \
+    --contrast_intra_weight 0.6 \
     --mae_loss_weight 1.0 \
     --log_freq 100 \
     --cls_token \
     --num_register_tokens 8 \
     # --fast_dev_run \
+    # --contrast_bidirect \
 
 echo "Training finished at $(date) with exit code $?"

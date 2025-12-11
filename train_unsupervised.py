@@ -40,6 +40,9 @@ class CAVMAEModule(pl.LightningModule):
             mask_ratio_v=self.hparams.mask_ratio_v,
             mae_loss_weight=self.hparams.mae_loss_weight,
             contrast_loss_weight=self.hparams.contrast_loss_weight,
+            contrast_bidirect=self.hparams.contrast_bidirect,
+            contrast_inter_weight=self.hparams.contrast_inter_weight,
+            contrast_intra_weight=self.hparams.contrast_intra_weight,
             mode=mode
         )
 
@@ -146,6 +149,9 @@ def get_args():
     parser.add_argument("--mask_ratio_v", type=float, default=0.75, help="Video mask ratio")
     parser.add_argument("--mae_loss_weight", type=float, default=1.0, help="Weight for MAE loss")
     parser.add_argument("--contrast_loss_weight", type=float, default=0.01, help="Weight for contrastive loss")
+    parser.add_argument("--contrast_bidirect", action="store_true", help="Use bidirectional contrastive loss")
+    parser.add_argument("--contrast_inter_weight", type=float, default=0.4, help="Weight for inter-sample contrastive loss")
+    parser.add_argument("--contrast_intra_weight", type=float, default=0.6, help="Weight for intra-sample contrastive loss")
     parser.add_argument("--cls_token", action="store_true", help="Use CLS token")
     parser.add_argument("--num_register_tokens", type=int, default=8, help="Number of register tokens")
     parser.add_argument("--contrastive_heads", action="store_true", help="Use contrastive heads")
