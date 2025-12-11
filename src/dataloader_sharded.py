@@ -174,22 +174,32 @@ class ShardedAudiosetDataset(IterableDataset):
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
         
-        if worker_info is None:
-            logging.info("Using a single process for dataloading.")
-            shards_to_read = self.shards
+        if torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+            per_rank = int(math.ceil(len(self.shards) / float(world_size)))
+            rank_start = rank * per_rank
+            rank_end = min(rank_start + per_rank, len(self.shards))
+            shards_for_rank = self.shards[rank_start:rank_end]
+            logging.info(f"Rank {rank}/{world_size}: assigned shards [{rank_start}:{rank_end}] ({len(shards_for_rank)} shards)")
         else:
-            logging.info(f"Using {worker_info.num_workers} processes for dataloading.")
-            per_worker = int(math.ceil(len(self.shards) / float(worker_info.num_workers)))
+            shards_for_rank = self.shards
+        
+        if worker_info is None:
+            shards_to_read = shards_for_rank
+        else:
+            per_worker = int(math.ceil(len(shards_for_rank) / float(worker_info.num_workers)))
             iter_start = worker_info.id * per_worker
-            iter_end = min(iter_start + per_worker, len(self.shards))
-            shards_to_read = self.shards[iter_start:iter_end]
+            iter_end = min(iter_start + per_worker, len(shards_for_rank))
+            shards_to_read = shards_for_rank[iter_start:iter_end]
+            logging.info(f"Worker {worker_info.id}/{worker_info.num_workers}: assigned {len(shards_to_read)} shards")
             
         if self.shuffle_shards:
             random.shuffle(shards_to_read)
             
         for shard_path in shards_to_read:
             try:
-                data_list = torch.load(shard_path)
+                data_list = torch.load(shard_path, weights_only=False)
                 if self.shuffle_shards: # Shuffle samples within shard
                     random.shuffle(data_list)
                     
@@ -199,3 +209,4 @@ class ShardedAudiosetDataset(IterableDataset):
             except Exception as e:
                 logging.warning(f"Error reading shard {shard_path}: {e}")
                 continue
+

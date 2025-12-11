@@ -248,10 +248,19 @@ def main():
         version=''
     )
     
+    # DDP strategy with find_unused_parameters=True
+    # Required because CAVMAE has conditional paths (contrastive_heads) that may leave parameters unused
+    # NOTE: Check whether this also works on a single GPU
+    if torch.cuda.is_available():
+        strategy = pl.strategies.DDPStrategy(find_unused_parameters=True)
+    else:
+        strategy = "auto"
+    
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
         devices="auto" if torch.cuda.is_available() else 1,
+        strategy=strategy,
         precision="16-mixed" if torch.cuda.is_available() else 32,
         callbacks=[checkpoint_callback, lr_monitor],
         logger=tb_logger,
@@ -260,6 +269,7 @@ def main():
         fast_dev_run=args.fast_dev_run,
         # Resume training if checkpoint provided
     )
+
     
     ckpt_path = args.resume
     if args.resume and os.path.exists(args.resume):

@@ -123,7 +123,7 @@ def main():
     if args.sharded_dataset_dir:
         logging.info(f"Using sharded dataset from {args.sharded_dataset_dir}")
         dataset = ShardedAudiosetDataset(
-            shards_dir=args.sharded_dataset_dir,
+            shard_dir=args.sharded_dataset_dir,
             audio_conf=audio_conf,
             shuffle_shards=False
         )
@@ -131,7 +131,8 @@ def main():
             dataset,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
-            pin_memory=True
+            pin_memory=True,
+            collate_fn=unsupervised_collate_fn
         )
     elif args.dataset_json:
         logging.info(f"Using legacy dataset from {args.dataset_json}")
