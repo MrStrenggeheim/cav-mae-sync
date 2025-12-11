@@ -86,10 +86,13 @@ class CAVMAEModule(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        # Use fused AdamW for faster CUDA execution (PyTorch 2.0+)
+        fused = torch.cuda.is_available() and hasattr(torch.optim.AdamW, 'fused')
         optimizer = optim.AdamW(
             self.parameters(), 
             lr=self.hparams.lr, 
-            weight_decay=self.hparams.weight_decay
+            weight_decay=self.hparams.weight_decay,
+            fused=fused
         )
         
         if self.hparams.warmup_epochs > 0:
