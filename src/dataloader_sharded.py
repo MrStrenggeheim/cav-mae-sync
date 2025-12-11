@@ -199,7 +199,7 @@ class ShardedAudiosetDataset(IterableDataset):
             
         for shard_path in shards_to_read:
             try:
-                data_list = torch.load(shard_path, weights_only=False)
+                data_list = torch.load(shard_path, weights_only=False, mmap=True)
                 if self.shuffle_shards: # Shuffle samples within shard
                     random.shuffle(data_list)
                     
@@ -209,4 +209,3 @@ class ShardedAudiosetDataset(IterableDataset):
             except Exception as e:
                 logging.warning(f"Error reading shard {shard_path}: {e}")
                 continue
-

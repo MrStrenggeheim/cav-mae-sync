@@ -168,6 +168,12 @@ def main():
     # Set float32 matmul precision to 'high'/'medium' (instead of 'highest') to utilize Tensor Cores if available
     torch.set_float32_matmul_precision('medium')
     
+    # Enable Flash Attention if available (PyTorch 2.0+)
+    if hasattr(torch.backends.cuda, 'enable_flash_sdp'):
+        torch.backends.cuda.enable_flash_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
+        logging.info("Flash Attention enabled")
+    
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     args = get_args()
     
@@ -202,12 +208,12 @@ def main():
         dataloader = DataLoader(
             dataset,
             batch_size=args.batch_size,
-            # shuffle=True, # Shuffling handled inside IterableDataset
             num_workers=args.num_workers,
             collate_fn=unsupervised_collate_fn,
             pin_memory=True,
             drop_last=True,
-            persistent_workers=True if args.num_workers > 0 else False
+            persistent_workers=True if args.num_workers > 0 else False,
+            prefetch_factor=4 if args.num_workers > 0 else None  # Increase prefetching for network storage
         )
     else:
         dataset = AudiosetDataset(
@@ -228,6 +234,11 @@ def main():
         )
     
     model = CAVMAEModule(args)
+    
+    # Apply torch.compile for faster execution (PyTorch 2.0+)
+    if hasattr(torch, 'compile'):
+        logging.info("Applying torch.compile to model (this may take a few minutes on first run)...")
+        model = torch.compile(model, mode='reduce-overhead')
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.save_path,
@@ -256,12 +267,23 @@ def main():
     else:
         strategy = "auto"
     
+    # Determine precision: use bf16 on Ampere+ GPUs (compute >= 8.0), else fp16
+    precision = 32  # Default for CPU
+    if torch.cuda.is_available():
+        device_capability = torch.cuda.get_device_capability()
+        if device_capability[0] >= 8:  # Ampere or newer
+            precision = "bf16-mixed"
+            logging.info(f"Using bfloat16 precision (GPU compute capability {device_capability[0]}.{device_capability[1]} >= 8.0)")
+        else:
+            precision = "16-mixed"
+            logging.info(f"Using float16 precision (GPU compute capability {device_capability[0]}.{device_capability[1]} < 8.0)")
+    
     trainer = pl.Trainer(
         max_epochs=args.epochs,
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
         devices="auto" if torch.cuda.is_available() else 1,
         strategy=strategy,
-        precision="16-mixed" if torch.cuda.is_available() else 32,
+        precision=precision,
         callbacks=[checkpoint_callback, lr_monitor],
         logger=tb_logger,
         log_every_n_steps=args.log_freq,
