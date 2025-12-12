@@ -2,12 +2,12 @@
 #SBATCH --job-name="Train CAV-MAE-Sync Sharded"
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=5
-#SBATCH --gres=gpu:a40:1
+#SBATCH --gres=gpu:a40:2
 #SBATCH --mem=64G
 #SBATCH --time=48:00:00
 #SBATCH --mail-type=END
-#SBATCH --output=/storage/slurm/schnackl/fakesync/slurm_logs_flo/slurm-cav-mae-sync-train-sharded-%j.out
-#SBATCH --error=/storage/slurm/schnackl/fakesync/slurm_logs_flo/slurm-cav-mae-sync-train-sharded-%j.err
+#SBATCH --output=/storage/slurm/hunecke/fakesync/slurm_logs/slurm-cav-mae-sync-train-sharded-%j.out
+#SBATCH --error=/storage/slurm/hunecke/fakesync/slurm_logs/slurm-cav-mae-sync-train-sharded-%j.err
 
 # 1. Force stdout/stderr to flush immediately
 export PYTHONUNBUFFERED=1
@@ -18,13 +18,13 @@ echo "Date: $(date)"
 echo "============================================"
 
 # 2. Environment Setup
-source /storage/slurm/schnackl/fakesync/myVenv/.venv/bin/activate
+source /storage/slurm/hunecke/fakesync/.venv/bin/activate
 echo "Running python version $(python3 --version) from $(which python)"
 echo "GPU info:"
 nvidia-smi
 
 # 3. Paths
-PROJECT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync
+PROJECT_PATH=/storage/slurm/hunecke/fakesync/cav-mae-sync
 SHARDED_DATASET_DIR=/storage/slurm/hunecke/fakesync/data/voxceleb2/preprocessed/shards_train
 SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_$(date +%Y%m%d_%H%M%S)
 
@@ -59,8 +59,8 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --save_path ${SAVE_PATH} \
     --resume /storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_mae_sync.pth \
     --contrast_loss_weight 0.1 \
-    --contrast_inter_weight 0.4 \
-    --contrast_intra_weight 0.6 \
+    --contrast_inter_weight 0.3 \
+    --contrast_intra_weight 0.7 \
     --mae_loss_weight 1.0 \
     --log_freq 100 \
     --cls_token \

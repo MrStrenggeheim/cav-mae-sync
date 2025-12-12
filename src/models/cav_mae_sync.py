@@ -797,6 +797,9 @@ class CAVMAE(nn.Module):
         mask_ratio_v=0.75,
         mae_loss_weight=1.0,
         contrast_loss_weight=0.01,
+        contrast_bidirect=False,
+        contrast_inter_weight=0.4,
+        contrast_intra_weight=0.6,
         mask_mode="unstructured",
         mode="train",
     ):
@@ -857,16 +860,44 @@ class CAVMAE(nn.Module):
         # Contrastive loss calculation
         if contrast_loss_weight != 0:
             if not self.cls_token:
-                loss_c, c_acc, inter_acc = self.forward_contrastive(latent_c_a.mean(dim=1), latent_c_v.mean(dim=1), mode=mode)
+                loss_c, c_acc, inter_acc = self.forward_contrastive(
+                    latent_c_a.mean(dim=1), 
+                    latent_c_v.mean(dim=1), 
+                    mode=mode, 
+                    contrast_bidirect=contrast_bidirect,
+                    contrast_inter_weight=contrast_inter_weight,
+                    contrast_intra_weight=contrast_intra_weight
+                )
             else:
                 if self.global_local_losses:
-                    global_loss_c, global_c_acc, global_inter_acc = self.forward_contrastive(cls_a, cls_v, mode=mode)
-                    local_loss_c, local_c_acc, local_inter_acc = self.forward_contrastive(latent_c_a.mean(dim=1), latent_c_v.mean(dim=1), mode=mode)
+                    global_loss_c, global_c_acc, global_inter_acc = self.forward_contrastive(
+                        cls_a, 
+                        cls_v, 
+                        mode=mode, 
+                        contrast_bidirect=contrast_bidirect,
+                        contrast_inter_weight=contrast_inter_weight,
+                        contrast_intra_weight=contrast_intra_weight
+                    )
+                    local_loss_c, local_c_acc, local_inter_acc = self.forward_contrastive(
+                        latent_c_a.mean(dim=1), 
+                        latent_c_v.mean(dim=1), 
+                        mode=mode, 
+                        contrast_bidirect=contrast_bidirect,
+                        contrast_inter_weight=contrast_inter_weight,
+                        contrast_intra_weight=contrast_intra_weight
+                    )
                     loss_c = (global_loss_c + local_loss_c) / 2
                     c_acc = (local_c_acc + global_c_acc) / 2
                     inter_acc = (global_inter_acc + local_inter_acc) / 2
                 else:
-                    loss_c, c_acc, inter_acc = self.forward_contrastive(cls_a, cls_v, mode=mode)
+                    loss_c, c_acc, inter_acc = self.forward_contrastive(
+                        cls_a, 
+                        cls_v, 
+                        mode=mode, 
+                        contrast_bidirect=contrast_bidirect,
+                        contrast_inter_weight=contrast_inter_weight,
+                        contrast_intra_weight=contrast_intra_weight
+                    )
             loss_c = contrast_loss_weight * loss_c
         else:
             loss_c, c_acc, inter_acc = torch.tensor(0.0, device=audio.device), torch.tensor(0.0, device=audio.device), torch.tensor(0.0, device=audio.device)
