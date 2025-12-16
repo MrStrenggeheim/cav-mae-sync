@@ -1,107 +1,79 @@
 import argparse
 import torch
 from torch.utils.data import DataLoader
-from src.dataloader_sync import AudiosetDataset
 import numpy as np
 from tqdm import tqdm
-import sys
-import os
 import logging
+import glob
+import os
 
 def get_args():
     parser = argparse.ArgumentParser(description="Calculate dataset normalization statistics")
-    parser.add_argument("--dataset_json", type=str, required=True, help="Path to dataset JSON file")
+    parser.add_argument("--shard_dir", type=str, required=True, help="Path to sharded dataset directory")
     parser.add_argument("--num_workers", type=int, default=4, help="Number of data loading workers")
-    parser.add_argument("--batch_size", type=int, default=512, help="Batch size")
-    parser.add_argument("--num_mel_bins", type=int, default=128, help="Number of mel bins")
-    parser.add_argument("--target_length", type=int, default=1024, help="Target audio length")
+    parser.add_argument("--max_shards", type=int, default=None, help="Max shards to process (for faster estimation)")
     return parser.parse_args()
-
-class AudioOnlyDataset(AudiosetDataset):
-    def __getitem__(self, index):
-        if index >= self.num_samples:
-            return None
-        
-        datum = self.decode_data(self.data[index])
-        try:
-            # Extract only audio features
-            fbank = self._wav2fbank(datum['wav'])
-            return fbank
-        except Exception as e:
-            logging.warning(f"Error processing {datum['video_id']}: {e}")
-            return None
-
-def collate_fn(batch):
-    # Filter failed loads
-    batch = [b for b in batch if b is not None]
-    if not batch:
-        logging.warning("All samples in batch failed to load.")
-        return torch.empty(0)
-    return torch.stack(batch)
 
 def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     args = get_args()
 
-    audio_conf = {
-        'num_mel_bins': args.num_mel_bins,
-        'mean': 0, 
-        'std': 1,
-        'target_length': args.target_length,
-        'mode': 'unsupervised_train',
-        'total_frame': 1, # unused
-        'im_res': 224, # unused
-        'augmentation': False,
-        'label_smooth': 0.0,
-        'freqm': 0,
-        'timem': 0,
-        'mixup': 0,
-        'dataset': 'custom',
-        'skip_norm': True,
-        'noise': False
-    }
+    shards = sorted(glob.glob(os.path.join(args.shard_dir, "shard_*.pt")))
+    if not shards:
+        logging.error(f"No shards found in {args.shard_dir}")
+        return
+    
+    if args.max_shards:
+        shards = shards[:args.max_shards]
+    
+    logging.info(f"Processing {len(shards)} shards from {args.shard_dir}...")
 
-    logging.info(f"Loading dataset from {args.dataset_json}...")
-    dataset = AudioOnlyDataset(
-        dataset_json_file=args.dataset_json,
-        audio_conf=audio_conf,
-        label_csv=None
-    )
+    # Welford's online algorithm for numerically stable mean/variance
+    count = 0
+    mean = 0.0
+    M2 = 0.0  # Sum of squared differences from current mean
 
-    dataloader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        collate_fn=collate_fn,
-        pin_memory=True
-    )
-
-    logging.info(f"Calculating stats for {len(dataset)} samples...")
-
-    total_sum = 0.0
-    total_sq_sum = 0.0
-    total_count = 0
-
-    for fbanks in tqdm(dataloader):
-        if fbanks.numel() == 0:
+    for shard_path in tqdm(shards, desc="Processing shards"):
+        try:
+            data_list = torch.load(shard_path, weights_only=False, mmap=True)
+            
+            for item in data_list:
+                fbank = item['fbank'].float()
+                fbank_length = item.get('fbank_length', fbank.shape[0])
+                fbank = fbank[:fbank_length].flatten()
+                
+                # Batch update using Welford's parallel algorithm
+                batch_count = fbank.numel()
+                batch_mean = fbank.mean().item()
+                batch_var = fbank.var().item() if batch_count > 1 else 0.0
+                batch_M2 = batch_var * batch_count
+                
+                # Combine with running stats
+                delta = batch_mean - mean
+                new_count = count + batch_count
+                mean = mean + delta * batch_count / new_count
+                M2 = M2 + batch_M2 + delta ** 2 * count * batch_count / new_count
+                count = new_count
+                
+        except Exception as e:
+            logging.warning(f"Error processing {shard_path}: {e}")
             continue
-        
-        fbanks = fbanks.float()
-        
-        total_sum += fbanks.sum()
-        total_sq_sum += (fbanks ** 2).sum()
-        total_count += fbanks.numel()
 
-    if total_count == 0:
-        logging.error("No data processed. Check dataset and dataloader.")
+    if count == 0:
+        logging.error("No data processed.")
         return
 
-    mean = total_sum / total_count
-    std = (total_sq_sum / total_count - mean ** 2) ** 0.5
+    variance = M2 / count
+    std = variance ** 0.5
 
-    logging.info(f"Calculated Mean: {mean.item()}")
-    logging.info(f"Calculated Std: {std.item()}")
+    logging.info(f"Processed {count:,} values")
+    logging.info(f"Mean: {mean:.12f}")
+    logging.info(f"Std:  {std:.12f}")
+    print()
+    print("# Add to FakeSyncConfig or audio_conf:")
+    print(f"mean: float = {mean}")
+    print(f"std: float = {std}")
 
 if __name__ == "__main__":
     main()
+
