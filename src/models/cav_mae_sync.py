@@ -294,6 +294,41 @@ class CAVMAE(nn.Module):
         for idx, block in enumerate(blocks):
             block.register_forward_hook(hook_fn)
 
+    def enable_gradient_checkpointing(self):
+        """
+        Enable gradient checkpointing to reduce memory at cost of compute.
+        Wraps transformer block forward passes to recompute activations during backward.
+        """
+        from torch.utils.checkpoint import checkpoint
+        
+        def make_checkpointed_forward(original_forward):
+            def checkpointed_forward(*args, **kwargs):
+                # checkpoint requires all args to be tensors or require_grad
+                # use_reentrant=False is recommended for new code
+                return checkpoint(original_forward, *args, use_reentrant=False, **kwargs)
+            return checkpointed_forward
+        
+        # Wrap encoder blocks (audio, visual, unified)
+        for block in self.blocks_a:
+            block.forward = make_checkpointed_forward(block.forward)
+        for block in self.blocks_v:
+            block.forward = make_checkpointed_forward(block.forward)
+        for block in self.blocks_u:
+            block.forward = make_checkpointed_forward(block.forward)
+        
+        # Wrap decoder blocks
+        for block in self.decoder_blocks:
+            block.forward = make_checkpointed_forward(block.forward)
+        
+        # Wrap contrastive heads if present
+        if self.contrastive_heads:
+            for block in self.constrative_head_audio:
+                block.forward = make_checkpointed_forward(block.forward)
+            for block in self.constrative_head_visual:
+                block.forward = make_checkpointed_forward(block.forward)
+        
+        print("Gradient checkpointing enabled for all transformer blocks")
+
     def initialize_weights(self):
         # initialize (and freeze) pos_embed by sin-cos embedding, opt the cls token, add by myself
         pos_embed_a = get_2d_sincos_pos_embed(

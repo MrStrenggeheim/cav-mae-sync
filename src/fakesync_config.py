@@ -48,6 +48,11 @@ class FakeSyncConfig:
     std: float = 4.067018032073975  # VoxCeleb2 normalization std
     
     # ===================
+    # Memory Optimization
+    # ===================
+    gradient_checkpointing: bool = True
+    
+    # ===================
     # Training Logistics
     # ===================
     log_freq: int = 100  # TensorBoard logging interval (steps)
