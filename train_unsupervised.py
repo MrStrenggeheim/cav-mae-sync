@@ -166,7 +166,7 @@ def get_args():
     parser.add_argument("--resume", type=str, default=None, help="Path to resume checkpoint (ckpt file)")
     parser.add_argument("--fast_dev_run", action="store_true", help="Run a quick development run")
     parser.add_argument("--checkpoint_interval_hours", type=float, default=1.0, help="Save checkpoint every N hours")
-    parser.add_argument("--gradient_checkpointing", action="store_true", default=True, help="Enable gradient checkpointing (default: True)")
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=False, help="Enable gradient checkpointing (default: True)")
     
     # Audio Conf defaults
     parser.add_argument("--num_mel_bins", type=int, default=128, help="Number of mel bins")

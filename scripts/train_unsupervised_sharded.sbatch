@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=5
 #SBATCH --gres=gpu:a40:2
 #SBATCH --mem=64G
-#SBATCH --time=48:00:00
+#SBATCH --time=00:00:15
 #SBATCH --mail-type=END
 #SBATCH --output=/storage/slurm/hunecke/fakesync/slurm_logs/slurm-cav-mae-sync-train-sharded-%j.out
 #SBATCH --error=/storage/slurm/hunecke/fakesync/slurm_logs/slurm-cav-mae-sync-train-sharded-%j.err
@@ -32,7 +32,7 @@ SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_$(date 
 # With sharded dataset and IterableDataset, BATCH_SIZE is per-worker batch size if we aren't careful, 
 # but PyTorch DataLoader usually treats batch_size as global batch size or per-worker depending on distributed.
 # In single-node non-DDP, standard DataLoader batch_size is total batch size.
-BATCH_SIZE=12
+BATCH_SIZE=48
 TOTAL_FRAME=16
 EPOCHS=10
 WARMUP_EPOCHS=1
@@ -58,7 +58,8 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --lr ${LR} \
     --save_path ${SAVE_PATH} \
     --resume /storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_mae_sync.pth \
-    --contrast_loss_weight 0.1 \
+    --contrast_bidirect \
+    --contrast_loss_weight 0.5 \
     --contrast_inter_weight 0.3 \
     --contrast_intra_weight 0.7 \
     --mae_loss_weight 1.0 \
@@ -66,6 +67,5 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --cls_token \
     --num_register_tokens 8 \
     # --fast_dev_run \
-    # --contrast_bidirect \
 
 echo "Training finished at $(date) with exit code $?"
