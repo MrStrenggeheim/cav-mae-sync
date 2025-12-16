@@ -60,6 +60,25 @@ class FakeSyncConfig:
     val_shard_dir: Optional[str] = None  # Future: validation dataset
     save_path: str = "./checkpoints"
     resume: Optional[str] = None
+    dataset_json: Optional[str] = None  # Legacy: non-sharded dataset
+    label_csv: Optional[str] = None  # Legacy: label CSV file
+    num_workers: int = 4  # DataLoader workers per GPU
+    fast_dev_run: bool = False  # Quick test with 1 batch
+    
+    # ===================
+    # Contrastive Loss
+    # ===================
+    contrast_bidirect: bool = False
+    contrast_intra_weight: float = 0.6
+    contrast_inter_weight: float = 0.4
+    
+    # ===================
+    # Sync Score (Evaluation)
+    # ===================
+    sync_similarity: str = 'cosine'  # 'cosine' or 'softmax'
+    sync_temperature: float = 0.05  # Temperature for softmax similarity
+    sync_aggregation: str = 'p10'  # 'mean', 'min', 'p10', 'p25'
+    sync_temporal_variance: bool = True  # Also compute variance across frames
     
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -124,6 +143,18 @@ class FakeSyncConfig:
         if self.embed_dim % 12 != 0:
             errors.append(
                 f"embed_dim ({self.embed_dim}) must be divisible by 12 (num_heads)"
+            )
+        
+        # Sync score parameters
+        valid_similarity = ('cosine', 'softmax')
+        if self.sync_similarity not in valid_similarity:
+            errors.append(
+                f"sync_similarity ({self.sync_similarity}) must be one of {valid_similarity}"
+            )
+        valid_aggregation = ('mean', 'min', 'p10', 'p25')
+        if self.sync_aggregation not in valid_aggregation:
+            errors.append(
+                f"sync_aggregation ({self.sync_aggregation}) must be one of {valid_aggregation}"
             )
         
         if errors:

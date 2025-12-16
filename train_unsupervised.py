@@ -232,10 +232,11 @@ def main():
     
     model = CAVMAEModule(args)
     
-    # Apply torch.compile for faster execution (PyTorch 2.0+)
-    if hasattr(torch, 'compile'):
-        logging.info("Applying torch.compile to model (this may take a few minutes on first run)...")
-        model = torch.compile(model, mode='reduce-overhead')
+    # NOTE: torch.compile disabled - CAV-MAE uses dynamic shapes in forward_decoder
+    # (e.g., int(mask_a[0].sum())) which causes constant graph breaks and recompilations.
+    # if hasattr(torch, 'compile'):
+    #     logging.info("Applying torch.compile to model...")
+    #     model = torch.compile(model, mode='reduce-overhead')
 
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.save_path,

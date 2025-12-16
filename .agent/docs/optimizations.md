@@ -22,15 +22,13 @@ Applied optimizations for CAV-MAE training on A40 cluster.
 
 **What**: JIT-compiles the model for faster execution via TorchDynamo.
 
-**Where**: `train_unsupervised.py` after model creation
+**Status**: DISABLED
 
-**Potential Issues**:
-- First iteration is slow (compilation overhead). This is normal.
-- If you see `torch._dynamo` errors or recompilation warnings:
-  1. The model has dynamic shapes (unlikely here)
-  2. Workaround: remove `torch.compile()` call temporarily
-- Checkpointing works, but resuming from checkpoint may re-trigger compilation.
-- If using `fast_dev_run`, the compile overhead will dominate the short run time.
+**Reason**: CAV-MAE uses dynamic shapes in `forward_decoder`:
+```python
+mask_tokens_a = self.mask_token.repeat(x.shape[0], int(mask_a[0].sum()), 1)
+```
+This causes constant graph breaks and recompilations (hit recompile_limit=8), actually hurting performance. Would require significant model code changes to fix.
 
 ---
 
@@ -80,6 +78,33 @@ Applied optimizations for CAV-MAE training on A40 cluster.
 
 ---
 
+## Gradient Checkpointing (Not Currently Implemented)
+
+**What**: Trades compute for memory by recomputing activations during backward pass.
+
+**Potential Implementation**:
+```python
+from torch.utils.checkpoint import checkpoint
+# Or use model.gradient_checkpointing_enable() if supported
+```
+
+**Why NOT implemented yet**:
+- Currently using `torch.compile(mode='reduce-overhead')` which may conflict with gradient checkpointing
+- torch.compile does its own memory optimizations
+- Would need extensive testing to ensure compatibility
+
+**When to consider**:
+- If batch size is limited by GPU memory and larger batches would help
+- If disabling torch.compile and enabling checkpointing gives net benefit
+- Requires benchmarking: checkpointing adds ~20-30% compute overhead
+
+**Testing required before implementation**:
+1. Benchmark current training throughput (samples/sec)
+2. Disable torch.compile, enable checkpointing
+3. Compare throughput and max batch size
+
+---
+
 ## Summary of Fallback Options
 
 | Issue | Check | Fix |
@@ -89,3 +114,21 @@ Applied optimizations for CAV-MAE training on A40 cluster.
 | bf16 NaN/instability | Check `device_capability` print | Training script has auto-fallback |
 | OOM during loading | Error during prefetch | Reduce `prefetch_factor` |
 | Slow shard IO | Training stalls at load | Remove `mmap=True` |
+
+---
+
+## Future Considerations
+
+### Preprocessing Parallelization
+
+Current preprocessing uses Python `multiprocessing.Pool` which works well for single-node preprocessing.
+
+For future large-scale dataset preprocessing across multiple nodes, consider:
+- **Ray**: Distributed computing framework with simple API
+- **Dask**: Parallel computing library for larger-than-memory datasets
+- **Slurm Job Arrays**: Submit multiple preprocessing jobs in parallel
+
+This would be useful when:
+- Preprocessing datasets significantly larger than current VoxCeleb2
+- Need to utilize multiple cluster nodes for preprocessing
+- Current preprocessing time becomes a bottleneck
