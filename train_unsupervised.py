@@ -97,14 +97,16 @@ class CAVMAEModule(pl.LightningModule):
                 agg_method = self.hparams.get('sync_aggregation', 'all')
                 
                 if agg_method == 'all':
-                    # Log all aggregation methods
-                    self.log('train/sync/mean', per_sample_sim.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
-                    self.log('train/sync/min', per_sample_sim.min(), on_step=True, on_epoch=True, logger=True)
-                    self.log('train/sync/p10', torch.quantile(per_sample_sim, 0.1), on_step=True, on_epoch=True, logger=True)
-                    self.log('train/sync/p25', torch.quantile(per_sample_sim, 0.25), on_step=True, on_epoch=True, logger=True)
-                    self.log('train/sync/variance', per_sample_sim.var(), on_step=True, on_epoch=True, logger=True)
+                    # Log all aggregation methods - Log every 50 steps to balance visibility and overhead
+                    should_log = (batch_idx % 50 == 0)
+                    self.log('train/sync/mean', per_sample_sim.mean(), on_step=should_log, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
+                    self.log('train/sync/min', per_sample_sim.min(), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
+                    self.log('train/sync/p10', torch.quantile(per_sample_sim, 0.1), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
+                    self.log('train/sync/p25', torch.quantile(per_sample_sim, 0.25), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
+                    self.log('train/sync/variance', per_sample_sim.var(), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
                 else:
                     # Log only the specified method
+                    should_log = (batch_idx % 50 == 0)
                     if agg_method == 'mean':
                         sync_score = per_sample_sim.mean()
                     elif agg_method == 'min':
@@ -115,16 +117,16 @@ class CAVMAEModule(pl.LightningModule):
                         sync_score = torch.quantile(per_sample_sim, 0.25)
                     else:
                         sync_score = per_sample_sim.mean()
-                    self.log('train/sync_score', sync_score, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-                    self.log('train/sync/variance', per_sample_sim.var(), on_step=True, on_epoch=True, logger=True)
+                    self.log('train/sync_score', sync_score, on_step=should_log, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
+                    self.log('train/sync/variance', per_sample_sim.var(), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
         
         # Logging
-        self.log('train/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train_loss_total', loss, on_step=True, on_epoch=True, logger=False) # For checkpoint filename
-        self.log('train/loss/mae', loss_mae, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train/loss/contrast', loss_c, on_step=True, on_epoch=True, logger=True)
-        self.log('train/acc/intra', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log('train/acc/inter', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log('train/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
+        self.log('train_loss_total', loss, on_step=True, on_epoch=True, logger=False, batch_size=video_ids.size(0)) # For checkpoint filename
+        self.log('train/loss/mae', loss_mae, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
+        self.log('train/loss/contrast', loss_c, on_step=True, on_epoch=True, logger=True, batch_size=video_ids.size(0))
+        self.log('train/acc/intra', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
+        self.log('train/acc/inter', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
         
         # Profile logging every log_freq steps
         log_freq = self.hparams.get('log_freq', 100)
@@ -132,8 +134,8 @@ class CAVMAEModule(pl.LightningModule):
             avg_data_time = self._profile_data_time / self._profile_step_count * 1000  # ms
             avg_forward_time = self._profile_forward_time / self._profile_step_count * 1000  # ms
             
-            self.log('profile/batch_gap_ms', avg_data_time, on_step=True, logger=True)
-            self.log('profile/forward_ms', avg_forward_time, on_step=True, logger=True)
+            self.log('profile/batch_gap_ms', avg_data_time, on_step=True, logger=True, batch_size=video_ids.size(0))
+            self.log('profile/forward_ms', avg_forward_time, on_step=True, logger=True, batch_size=video_ids.size(0))
             
             if torch.cuda.is_available():
                 gpu_mem = torch.cuda.max_memory_allocated() / 1024**3  # GB
@@ -219,13 +221,24 @@ def get_args():
     parser.add_argument("--label_csv", type=str, default=None, help="Path to label CSV file")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size (number of videos)")
     # Try to determine safe default workers respecting affinity (Slurm friendly)
+    # Try to determine safe default workers respecting affinity and multi-GPU
     try:
-        default_workers = len(os.sched_getaffinity(0))
-    except (AttributeError, NotImplementedError):
+        # Total CPUs assigned to this task/job
         if os.environ.get("SLURM_CPUS_PER_TASK"):
-            default_workers = int(os.environ.get("SLURM_CPUS_PER_TASK"))
+            total_cpus = int(os.environ.get("SLURM_CPUS_PER_TASK"))
         else:
-            default_workers = os.cpu_count() or 4
+            total_cpus = len(os.sched_getaffinity(0))
+        
+        # If running on multiple GPUs on this node, divide workers
+        ngpus = torch.cuda.device_count()
+        if ngpus > 1:
+            default_workers = max(1, total_cpus // ngpus)
+            logging.info(f"Auto-detected {total_cpus} CPUs and {ngpus} GPUs. Setting default workers to {default_workers} per GPU.")
+        else:
+            default_workers = total_cpus
+            
+    except (AttributeError, NotImplementedError, OSError):
+        default_workers = os.cpu_count() or 4
         
     parser.add_argument("--num_workers", type=int, default=default_workers, help="Number of data loading workers")
     parser.add_argument("--total_frame", type=int, default=16, help="Number of frames per video")
