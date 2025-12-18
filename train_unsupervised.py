@@ -99,11 +99,11 @@ class CAVMAEModule(pl.LightningModule):
                 if agg_method == 'all':
                     # Log all aggregation methods - Log every 50 steps to balance visibility and overhead
                     should_log = (batch_idx % 50 == 0)
-                    self.log('train/sync/mean', per_sample_sim.mean(), on_step=should_log, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
-                    self.log('train/sync/min', per_sample_sim.min(), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
-                    self.log('train/sync/p10', torch.quantile(per_sample_sim, 0.1), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
-                    self.log('train/sync/p25', torch.quantile(per_sample_sim, 0.25), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
-                    self.log('train/sync/variance', per_sample_sim.var(), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
+                    self.log('train/sync/mean', per_sample_sim.mean(), on_step=should_log, on_epoch=True, prog_bar=True, logger=True, batch_size=len(video_ids))
+                    self.log('train/sync/min', per_sample_sim.min(), on_step=should_log, on_epoch=True, logger=True, batch_size=len(video_ids))
+                    self.log('train/sync/p10', torch.quantile(per_sample_sim, 0.1), on_step=should_log, on_epoch=True, logger=True, batch_size=len(video_ids))
+                    self.log('train/sync/p25', torch.quantile(per_sample_sim, 0.25), on_step=should_log, on_epoch=True, logger=True, batch_size=len(video_ids))
+                    self.log('train/sync/variance', per_sample_sim.var(), on_step=should_log, on_epoch=True, logger=True, batch_size=len(video_ids))
                 else:
                     # Log only the specified method
                     should_log = (batch_idx % 50 == 0)
@@ -117,16 +117,16 @@ class CAVMAEModule(pl.LightningModule):
                         sync_score = torch.quantile(per_sample_sim, 0.25)
                     else:
                         sync_score = per_sample_sim.mean()
-                    self.log('train/sync_score', sync_score, on_step=should_log, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
-                    self.log('train/sync/variance', per_sample_sim.var(), on_step=should_log, on_epoch=True, logger=True, batch_size=video_ids.size(0))
+                    self.log('train/sync_score', sync_score, on_step=should_log, on_epoch=True, prog_bar=True, logger=True, batch_size=len(video_ids))
+                    self.log('train/sync/variance', per_sample_sim.var(), on_step=should_log, on_epoch=True, logger=True, batch_size=len(video_ids))
         
         # Logging
-        self.log('train/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
-        self.log('train_loss_total', loss, on_step=True, on_epoch=True, logger=False, batch_size=video_ids.size(0)) # For checkpoint filename
-        self.log('train/loss/mae', loss_mae, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
-        self.log('train/loss/contrast', loss_c, on_step=True, on_epoch=True, logger=True, batch_size=video_ids.size(0))
-        self.log('train/acc/intra', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
-        self.log('train/acc/inter', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=video_ids.size(0))
+        self.log('train/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=len(video_ids))
+        self.log('train_loss_total', loss, on_step=True, on_epoch=True, logger=False, batch_size=len(video_ids)) # For checkpoint filename
+        self.log('train/loss/mae', loss_mae, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=len(video_ids))
+        self.log('train/loss/contrast', loss_c, on_step=True, on_epoch=True, logger=True, batch_size=len(video_ids))
+        self.log('train/acc/intra', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=len(video_ids))
+        self.log('train/acc/inter', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=len(video_ids))
         
         # Profile logging every log_freq steps
         log_freq = self.hparams.get('log_freq', 100)
@@ -134,8 +134,8 @@ class CAVMAEModule(pl.LightningModule):
             avg_data_time = self._profile_data_time / self._profile_step_count * 1000  # ms
             avg_forward_time = self._profile_forward_time / self._profile_step_count * 1000  # ms
             
-            self.log('profile/batch_gap_ms', avg_data_time, on_step=True, logger=True, batch_size=video_ids.size(0))
-            self.log('profile/forward_ms', avg_forward_time, on_step=True, logger=True, batch_size=video_ids.size(0))
+            self.log('profile/batch_gap_ms', avg_data_time, on_step=True, logger=True, batch_size=len(video_ids))
+            self.log('profile/forward_ms', avg_forward_time, on_step=True, logger=True, batch_size=len(video_ids))
             
             if torch.cuda.is_available():
                 gpu_mem = torch.cuda.max_memory_allocated() / 1024**3  # GB

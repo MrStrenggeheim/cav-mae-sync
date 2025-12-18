@@ -12,7 +12,7 @@
 # 1. Force stdout/stderr to flush immediately
 export PYTHONUNBUFFERED=1
 # DEBUG for profiling output
-export LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+export LOG_LEVEL=${LOG_LEVEL:-INFO}
 
 echo "================ DEBUG INFO ================"
 echo "Hostname: $(hostname)"
