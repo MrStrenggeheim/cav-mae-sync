@@ -280,8 +280,20 @@ def main():
     
     # Configure logging
     log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
-    logging.basicConfig(level=getattr(logging, log_level, logging.INFO), 
-                        format='%(asctime)s - %(levelname)s - %(message)s')
+    numeric_level = getattr(logging, log_level, logging.INFO)
+    
+    root_logger = logging.getLogger()
+    root_logger.setLevel(numeric_level)
+    
+    if not root_logger.handlers:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(numeric_level)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+    else:
+        for handler in root_logger.handlers:
+            handler.setLevel(numeric_level)
     args = get_args()
     
     # Validate configuration (will raise ValueError if invalid)
@@ -359,9 +371,8 @@ def main():
     )
     
     if torch.cuda.is_available():
-        # DDP strategy configuration:
-        # - find_unused_parameters: required when contrastive_heads may have unused params
-        # - static_graph: DISABLED due to PyTorch bug (expect_autograd_hooks_ assertion)
+        # DDP strategy: find_unused_parameters=True required because model has
+        # conditional parameter usage (e.g., contrastive heads, different return paths)
         strategy = pl.strategies.DDPStrategy(
             find_unused_parameters=True,
             gradient_as_bucket_view=True,
