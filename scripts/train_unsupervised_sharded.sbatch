@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name="Train CAV-MAE-Sync Sharded"
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:a40:2
 #SBATCH --mem=64G
-#SBATCH --time=48:00:00
+#SBATCH --time=72:00:00
 #SBATCH --mail-type=END
 #SBATCH --output=/storage/slurm/hunecke/fakesync/slurm_logs/slurm-cav-mae-sync-train-sharded-%j.out
 #SBATCH --error=/storage/slurm/hunecke/fakesync/slurm_logs/slurm-cav-mae-sync-train-sharded-%j.err
@@ -63,7 +63,8 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --lr ${LR} \
     --save_path ${SAVE_PATH} \
     --resume /storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_mae_sync.pth \
-    --contrast_loss_weight 0.1 \
+    --contrast_bidirect \
+    --contrast_loss_weight 0.5 \
     --contrast_inter_weight 0.3 \
     --contrast_intra_weight 0.7 \
     --mae_loss_weight 1.0 \
@@ -72,6 +73,5 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --num_register_tokens 8 \
     --gradient_accumulation_steps ${ACCUMULATION_STEPS}
     # --fast_dev_run \
-    # --contrast_bidirect \
 
 echo "Training finished at $(date) with exit code $?"
