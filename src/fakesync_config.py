@@ -44,13 +44,14 @@ class FakeSyncConfig:
     # Audio Processing
     # ===================
     num_mel_bins: int = 128
-    mean: float = -4.050048828125  # VoxCeleb2 normalization mean
-    std: float = 4.067018032073975  # VoxCeleb2 normalization std
+    mean: float = -6.166528  # VoxCeleb2 normalization mean
+    std: float = 3.483568  # VoxCeleb2 normalization std
     
     # ===================
     # Memory Optimization
     # ===================
     gradient_checkpointing: bool = True
+    gradient_accumulation_steps: int = 1
     
     # ===================
     # Training Logistics
@@ -82,7 +83,7 @@ class FakeSyncConfig:
     # ===================
     sync_similarity: str = 'cosine'  # 'cosine' or 'softmax'
     sync_temperature: float = 0.05  # Temperature for softmax similarity
-    sync_aggregation: str = 'p10'  # 'mean', 'min', 'p10', 'p25'
+    sync_aggregation: str = 'all'  # 'all', 'mean', 'min', 'p10', 'p25'
     sync_temporal_variance: bool = True  # Also compute variance across frames
     
     def __post_init__(self):
@@ -156,7 +157,7 @@ class FakeSyncConfig:
             errors.append(
                 f"sync_similarity ({self.sync_similarity}) must be one of {valid_similarity}"
             )
-        valid_aggregation = ('mean', 'min', 'p10', 'p25')
+        valid_aggregation = ('all', 'mean', 'min', 'p10', 'p25')
         if self.sync_aggregation not in valid_aggregation:
             errors.append(
                 f"sync_aggregation ({self.sync_aggregation}) must be one of {valid_aggregation}"

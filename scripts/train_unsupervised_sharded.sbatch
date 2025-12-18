@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name="Train CAV-MAE-Sync Sharded"
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:a40:2
 #SBATCH --mem=64G
 #SBATCH --time=72:00:00
@@ -11,6 +11,8 @@
 
 # 1. Force stdout/stderr to flush immediately
 export PYTHONUNBUFFERED=1
+# DEBUG for profiling output
+export LOG_LEVEL=${LOG_LEVEL:-INFO}
 
 echo "================ DEBUG INFO ================"
 echo "Hostname: $(hostname)"
@@ -29,24 +31,27 @@ SHARDED_DATASET_DIR=/storage/slurm/hunecke/fakesync/data/voxceleb2/preprocessed/
 SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_$(date +%Y%m%d_%H%M%S)
 
 # 4. Training Configuration
-# With sharded dataset and IterableDataset, BATCH_SIZE is per-worker batch size if we aren't careful, 
-# but PyTorch DataLoader usually treats batch_size as global batch size or per-worker depending on distributed.
-# In single-node non-DDP, standard DataLoader batch_size is total batch size.
-BATCH_SIZE=20
+BATCH_SIZE=24
 TOTAL_FRAME=16
 EPOCHS=10
 WARMUP_EPOCHS=1
 LR=1e-4
+# Gradient accumulation: effective_batch = BATCH_SIZE * ACCUMULATION_STEPS * NUM_GPUS
+# Default: 24 * 2 * 2 = 96 effective batch
+ACCUMULATION_STEPS=2
+
+# 5. Multi-GPU / NCCL Optimizations
+export NCCL_DEBUG=WARN
+export NCCL_IB_DISABLE=0
+export NCCL_SOCKET_NTHREADS=4
+export NCCL_NSOCKS_PERTHREAD=4
+export TORCH_NCCL_BLOCKING_WAIT=1
 
 echo "Starting training..."
 echo "Project Path: ${PROJECT_PATH}"
 echo "Sharded Dataset Dir: ${SHARDED_DATASET_DIR}"
 echo "Save Path: ${SAVE_PATH}"
 
-# 5. Run Training
-# Note: removed --dataset_json and added --sharded_dataset_dir
-# Note: --contrastive_heads is NOT used because the pretrained model (cav_mae_sync.pth) 
-#       was trained without contrastive heads. Using them would create architecture mismatch.
 python3 ${PROJECT_PATH}/train_unsupervised.py \
     --sharded_dataset_dir ${SHARDED_DATASET_DIR} \
     --batch_size ${BATCH_SIZE} \
@@ -66,6 +71,7 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --log_freq 100 \
     --cls_token \
     --num_register_tokens 8 \
+    --gradient_accumulation_steps ${ACCUMULATION_STEPS}
     # --fast_dev_run \
 
 echo "Training finished at $(date) with exit code $?"

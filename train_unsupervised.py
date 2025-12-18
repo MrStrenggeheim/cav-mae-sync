@@ -31,6 +31,19 @@ class CAVMAEModule(pl.LightningModule):
             cls_token=args.cls_token,
             num_register_tokens=args.num_register_tokens
         )
+        
+        # Profiling (accumulate over log_freq steps, then report)
+        self._profile_data_time = 0.0
+        self._profile_forward_time = 0.0
+        self._profile_step_count = 0
+        self._batch_start_time = None
+
+    def on_train_batch_start(self, batch, batch_idx):
+        import time
+
+        if self._batch_start_time is not None:
+            self._profile_data_time += time.perf_counter() - self._batch_start_time
+        self._batch_start_time = time.perf_counter()
 
     def forward(self, fbanks, images, mode='unsupervised_train'):
         return self.model(
@@ -47,9 +60,16 @@ class CAVMAEModule(pl.LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
+        import time
         fbanks, images, video_ids, frame_indices = batch
         
+        forward_start = time.perf_counter()
         outputs = self(fbanks, images)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        forward_time = time.perf_counter() - forward_start
+        self._profile_forward_time += forward_time
+        self._profile_step_count += 1
         
         # Unpack outputs from dictionary
         loss = outputs['loss']
@@ -57,6 +77,40 @@ class CAVMAEModule(pl.LightningModule):
         loss_c = outputs['loss_c']
         intra_acc = outputs['c_acc']
         inter_acc = outputs['inter_acc']
+        
+        cls_a = outputs.get('cls_a')
+        cls_v = outputs.get('cls_v')
+        if cls_a is not None and cls_v is not None:
+            with torch.no_grad():
+                # Normalize embeddings
+                cls_a_norm = torch.nn.functional.normalize(cls_a, dim=-1)
+                cls_v_norm = torch.nn.functional.normalize(cls_v, dim=-1)
+                
+                per_sample_sim = (cls_a_norm * cls_v_norm).sum(dim=-1)
+                
+                agg_method = self.hparams.get('sync_aggregation', 'all')
+                
+                if agg_method == 'all':
+                    # Log all aggregation methods
+                    self.log('train/sync/mean', per_sample_sim.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+                    self.log('train/sync/min', per_sample_sim.min(), on_step=True, on_epoch=True, logger=True)
+                    self.log('train/sync/p10', torch.quantile(per_sample_sim, 0.1), on_step=True, on_epoch=True, logger=True)
+                    self.log('train/sync/p25', torch.quantile(per_sample_sim, 0.25), on_step=True, on_epoch=True, logger=True)
+                    self.log('train/sync/variance', per_sample_sim.var(), on_step=True, on_epoch=True, logger=True)
+                else:
+                    # Log only the specified method
+                    if agg_method == 'mean':
+                        sync_score = per_sample_sim.mean()
+                    elif agg_method == 'min':
+                        sync_score = per_sample_sim.min()
+                    elif agg_method == 'p10':
+                        sync_score = torch.quantile(per_sample_sim, 0.1)
+                    elif agg_method == 'p25':
+                        sync_score = torch.quantile(per_sample_sim, 0.25)
+                    else:
+                        sync_score = per_sample_sim.mean()
+                    self.log('train/sync_score', sync_score, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+                    self.log('train/sync/variance', per_sample_sim.var(), on_step=True, on_epoch=True, logger=True)
         
         # Logging
         self.log('train/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -66,7 +120,37 @@ class CAVMAEModule(pl.LightningModule):
         self.log('train/acc/intra', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log('train/acc/inter', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
+        # Profile logging every log_freq steps
+        log_freq = self.hparams.get('log_freq', 100)
+        if self._profile_step_count >= log_freq and self._profile_step_count > 0:
+            avg_data_time = self._profile_data_time / self._profile_step_count * 1000  # ms
+            avg_forward_time = self._profile_forward_time / self._profile_step_count * 1000  # ms
+            
+            self.log('profile/batch_gap_ms', avg_data_time, on_step=True, logger=True)
+            self.log('profile/forward_ms', avg_forward_time, on_step=True, logger=True)
+            
+            if torch.cuda.is_available():
+                gpu_mem = torch.cuda.max_memory_allocated() / 1024**3  # GB
+                logging.debug(
+                    f"[Profile] batch_gap: {avg_data_time:.1f}ms, forward: {avg_forward_time:.1f}ms, "
+                    f"GPU_mem: {gpu_mem:.1f}GB (avg over {self._profile_step_count} steps)"
+                )
+            else:
+                logging.debug(
+                    f"[Profile] batch_gap: {avg_data_time:.1f}ms, forward: {avg_forward_time:.1f}ms "
+                    f"(avg over {self._profile_step_count} steps)"
+                )
+            
+            # Reset counters
+            self._profile_data_time = 0.0
+            self._profile_forward_time = 0.0
+            self._profile_step_count = 0
+        
         return loss
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        import time
+        self._batch_start_time = time.perf_counter()
 
     def test_step(self, batch, batch_idx):
         fbanks, images, video_ids, frame_indices = batch
@@ -155,6 +239,8 @@ def get_args():
     parser.add_argument("--cls_token", action="store_true", help="Use CLS token")
     parser.add_argument("--num_register_tokens", type=int, default=8, help="Number of register tokens")
     parser.add_argument("--contrastive_heads", action="store_true", help="Use contrastive heads")
+    parser.add_argument("--sync_aggregation", type=str, default="all", choices=["all", "mean", "min", "p10", "p25"], 
+                        help="Aggregation method for sync score ('all' logs all methods)")
     
     # Training arguments
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
@@ -166,12 +252,13 @@ def get_args():
     parser.add_argument("--resume", type=str, default=None, help="Path to resume checkpoint (ckpt file)")
     parser.add_argument("--fast_dev_run", action="store_true", help="Run a quick development run")
     parser.add_argument("--checkpoint_interval_hours", type=float, default=1.0, help="Save checkpoint every N hours")
-    parser.add_argument("--gradient_checkpointing", action="store_true", default=False, help="Enable gradient checkpointing (default: True)")
+    parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing (default: True)")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Accumulate gradients over N steps (simulate larger batch)")
     
     # Audio Conf defaults
     parser.add_argument("--num_mel_bins", type=int, default=128, help="Number of mel bins")
-    parser.add_argument("--mean", type=float, default=-4.050048828125, help="Dataset mean")
-    parser.add_argument("--std", type=float, default=4.067018032073975, help="Dataset std")
+    parser.add_argument("--mean", type=float, default=-6.166528, help="Dataset mean")
+    parser.add_argument("--std", type=float, default=3.483568, help="Dataset std")
     
     return parser.parse_args()
 
@@ -185,7 +272,10 @@ def main():
         torch.backends.cuda.enable_mem_efficient_sdp(True)
         logging.info("Flash Attention enabled")
     
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Configure logging
+    log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    logging.basicConfig(level=getattr(logging, log_level, logging.INFO), 
+                        format='%(asctime)s - %(levelname)s - %(message)s')
     args = get_args()
     
     # Validate configuration (will raise ValueError if invalid)
@@ -262,11 +352,12 @@ def main():
         version=''
     )
     
-    # DDP strategy with find_unused_parameters=True
-    # Required because CAVMAE has conditional paths (contrastive_heads) that may leave parameters unused
-    # NOTE: Check whether this also works on a single GPU
     if torch.cuda.is_available():
-        strategy = pl.strategies.DDPStrategy(find_unused_parameters=True)
+        strategy = pl.strategies.DDPStrategy(
+            find_unused_parameters=args.contrastive_heads,
+            gradient_as_bucket_view=True,
+            static_graph=not args.contrastive_heads  # Safe when graph structure is constant
+        )
     else:
         strategy = "auto"
     
@@ -292,6 +383,8 @@ def main():
         log_every_n_steps=args.log_freq,
         default_root_dir=args.save_path,
         fast_dev_run=args.fast_dev_run,
+        # gradient_clip_val=1.0,  # could also test this
+        accumulate_grad_batches=args.gradient_accumulation_steps,
         # Resume training if checkpoint provided
     )
 
