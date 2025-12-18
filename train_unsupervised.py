@@ -280,8 +280,20 @@ def main():
     
     # Configure logging
     log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
-    logging.basicConfig(level=getattr(logging, log_level, logging.INFO), 
-                        format='%(asctime)s - %(levelname)s - %(message)s')
+    numeric_level = getattr(logging, log_level, logging.INFO)
+    
+    root_logger = logging.getLogger()
+    root_logger.setLevel(numeric_level)
+    
+    if not root_logger.handlers:
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(numeric_level)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+    else:
+        for handler in root_logger.handlers:
+            handler.setLevel(numeric_level)
     args = get_args()
     
     # Validate configuration (will raise ValueError if invalid)
