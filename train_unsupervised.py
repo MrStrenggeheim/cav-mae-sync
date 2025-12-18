@@ -257,8 +257,8 @@ def get_args():
     
     # Audio Conf defaults
     parser.add_argument("--num_mel_bins", type=int, default=128, help="Number of mel bins")
-    parser.add_argument("--mean", type=float, default=-4.050048828125, help="Dataset mean")
-    parser.add_argument("--std", type=float, default=4.067018032073975, help="Dataset std")
+    parser.add_argument("--mean", type=float, default=-6.166528, help="Dataset mean")
+    parser.add_argument("--std", type=float, default=3.483568, help="Dataset std")
     
     return parser.parse_args()
 

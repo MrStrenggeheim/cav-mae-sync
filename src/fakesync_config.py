@@ -44,8 +44,8 @@ class FakeSyncConfig:
     # Audio Processing
     # ===================
     num_mel_bins: int = 128
-    mean: float = -4.050048828125  # VoxCeleb2 normalization mean
-    std: float = 4.067018032073975  # VoxCeleb2 normalization std
+    mean: float = -6.166528  # VoxCeleb2 normalization mean
+    std: float = 3.483568  # VoxCeleb2 normalization std
     
     # ===================
     # Memory Optimization
