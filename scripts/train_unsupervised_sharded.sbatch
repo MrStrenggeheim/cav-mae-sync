@@ -46,6 +46,8 @@ export NCCL_IB_DISABLE=0
 export NCCL_SOCKET_NTHREADS=4
 export NCCL_NSOCKS_PERTHREAD=4
 export TORCH_NCCL_BLOCKING_WAIT=1
+# Use unique port per job to avoid "Address already in use" errors
+export MASTER_PORT=$((29500 + SLURM_JOB_ID % 1000))
 
 echo "Starting training..."
 echo "Project Path: ${PROJECT_PATH}"

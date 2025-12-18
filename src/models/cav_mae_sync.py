@@ -965,11 +965,25 @@ class CAVMAE(nn.Module):
                     'local_loss_c': contrast_loss_weight * local_loss_c,
                     'inter_acc': inter_acc,
                 }
-            # NOTE: Previously, cls_a/cls_v were overwritten with latent_c_a/latent_c_v here.
-            # This was incorrect because it replaced the actual CLS tokens (from forward_encoder
-            # line 591-592) with patch embeddings, causing shape mismatches in sync score computation.
-            # The CLS tokens from forward_encoder are now preserved.
-            pass
+            # cls_a/cls_v already contain the CLS tokens from forward_encoder (lines 591-592)
+            # Include latent_c_a/v means to ensure all computed tensors are used (avoids DDP issues)
+            return {
+                'loss': loss,
+                'loss_mae': loss_mae,
+                'loss_mae_a': loss_mae_a,
+                'loss_mae_v': loss_mae_v,
+                'loss_c': loss_c,
+                'mask_a': mask_a,
+                'mask_v': mask_v,
+                'c_acc': c_acc,
+                'recon_a': recon_a,
+                'recon_v': recon_v,
+                'cls_a': cls_a,
+                'cls_v': cls_v,
+                'latent_c_a_mean': latent_c_a.mean(dim=1),
+                'latent_c_v_mean': latent_c_v.mean(dim=1),
+                'inter_acc': inter_acc,
+            }
         else:
             # When cls_token=False, use mean-pooled patch embeddings as representation
             cls_a = latent_c_a.mean(dim=1)
