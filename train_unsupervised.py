@@ -359,11 +359,10 @@ def main():
     )
     
     if torch.cuda.is_available():
-        # DDP strategy configuration:
-        # - find_unused_parameters: required when contrastive_heads may have unused params
-        # - static_graph: DISABLED due to PyTorch bug (expect_autograd_hooks_ assertion)
+        # DDP strategy: find_unused_parameters=True required because model has
+        # conditional parameter usage (e.g., contrastive heads, different return paths)
         strategy = pl.strategies.DDPStrategy(
-            find_unused_parameters=args.contrastive_heads,
+            find_unused_parameters=True,
             gradient_as_bucket_view=True,
             static_graph=False
         )
