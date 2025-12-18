@@ -51,6 +51,7 @@ class FakeSyncConfig:
     # Memory Optimization
     # ===================
     gradient_checkpointing: bool = True
+    gradient_accumulation_steps: int = 1
     
     # ===================
     # Training Logistics

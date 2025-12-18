@@ -31,6 +31,19 @@ class CAVMAEModule(pl.LightningModule):
             cls_token=args.cls_token,
             num_register_tokens=args.num_register_tokens
         )
+        
+        # Profiling (accumulate over log_freq steps, then report)
+        self._profile_data_time = 0.0
+        self._profile_forward_time = 0.0
+        self._profile_step_count = 0
+        self._batch_start_time = None
+
+    def on_train_batch_start(self, batch, batch_idx):
+        import time
+
+        if self._batch_start_time is not None:
+            self._profile_data_time += time.perf_counter() - self._batch_start_time
+        self._batch_start_time = time.perf_counter()
 
     def forward(self, fbanks, images, mode='unsupervised_train'):
         return self.model(
@@ -47,9 +60,16 @@ class CAVMAEModule(pl.LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
+        import time
         fbanks, images, video_ids, frame_indices = batch
         
+        forward_start = time.perf_counter()
         outputs = self(fbanks, images)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        forward_time = time.perf_counter() - forward_start
+        self._profile_forward_time += forward_time
+        self._profile_step_count += 1
         
         # Unpack outputs from dictionary
         loss = outputs['loss']
@@ -66,7 +86,37 @@ class CAVMAEModule(pl.LightningModule):
         self.log('train/acc/intra', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log('train/acc/inter', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
+        # Profile logging every log_freq steps
+        log_freq = self.hparams.get('log_freq', 100)
+        if self._profile_step_count >= log_freq and self._profile_step_count > 0:
+            avg_data_time = self._profile_data_time / self._profile_step_count * 1000  # ms
+            avg_forward_time = self._profile_forward_time / self._profile_step_count * 1000  # ms
+            
+            self.log('profile/batch_gap_ms', avg_data_time, on_step=True, logger=True)
+            self.log('profile/forward_ms', avg_forward_time, on_step=True, logger=True)
+            
+            if torch.cuda.is_available():
+                gpu_mem = torch.cuda.max_memory_allocated() / 1024**3  # GB
+                logging.debug(
+                    f"[Profile] batch_gap: {avg_data_time:.1f}ms, forward: {avg_forward_time:.1f}ms, "
+                    f"GPU_mem: {gpu_mem:.1f}GB (avg over {self._profile_step_count} steps)"
+                )
+            else:
+                logging.debug(
+                    f"[Profile] batch_gap: {avg_data_time:.1f}ms, forward: {avg_forward_time:.1f}ms "
+                    f"(avg over {self._profile_step_count} steps)"
+                )
+            
+            # Reset counters
+            self._profile_data_time = 0.0
+            self._profile_forward_time = 0.0
+            self._profile_step_count = 0
+        
         return loss
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        import time
+        self._batch_start_time = time.perf_counter()
 
     def test_step(self, batch, batch_idx):
         fbanks, images, video_ids, frame_indices = batch
@@ -167,6 +217,7 @@ def get_args():
     parser.add_argument("--fast_dev_run", action="store_true", help="Run a quick development run")
     parser.add_argument("--checkpoint_interval_hours", type=float, default=1.0, help="Save checkpoint every N hours")
     parser.add_argument("--gradient_checkpointing", action="store_true", default=True, help="Enable gradient checkpointing (default: True)")
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Accumulate gradients over N steps (simulate larger batch)")
     
     # Audio Conf defaults
     parser.add_argument("--num_mel_bins", type=int, default=128, help="Number of mel bins")
@@ -185,7 +236,10 @@ def main():
         torch.backends.cuda.enable_mem_efficient_sdp(True)
         logging.info("Flash Attention enabled")
     
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Configure logging
+    log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    logging.basicConfig(level=getattr(logging, log_level, logging.INFO), 
+                        format='%(asctime)s - %(levelname)s - %(message)s')
     args = get_args()
     
     # Validate configuration (will raise ValueError if invalid)
@@ -262,11 +316,12 @@ def main():
         version=''
     )
     
-    # DDP strategy with find_unused_parameters=True
-    # Required because CAVMAE has conditional paths (contrastive_heads) that may leave parameters unused
-    # NOTE: Check whether this also works on a single GPU
     if torch.cuda.is_available():
-        strategy = pl.strategies.DDPStrategy(find_unused_parameters=True)
+        strategy = pl.strategies.DDPStrategy(
+            find_unused_parameters=args.contrastive_heads,
+            gradient_as_bucket_view=True,
+            static_graph=not args.contrastive_heads  # Safe when graph structure is constant
+        )
     else:
         strategy = "auto"
     
@@ -292,6 +347,8 @@ def main():
         log_every_n_steps=args.log_freq,
         default_root_dir=args.save_path,
         fast_dev_run=args.fast_dev_run,
+        # gradient_clip_val=1.0,  # could also test this
+        accumulate_grad_batches=args.gradient_accumulation_steps,
         # Resume training if checkpoint provided
     )
 

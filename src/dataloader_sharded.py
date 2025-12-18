@@ -76,6 +76,7 @@ class ShardedAudiosetDataset(IterableDataset):
         """
         Slice fbank centered at timestamp with edge padding.
         fbank frame_shift = 10ms, so timestamp_ms / 10 = center frame index.
+        Always returns tensor of shape [target_length, 128].
         """
         FRAME_SHIFT_MS = 10
         center_frame = int(timestamp_ms / FRAME_SHIFT_MS)
@@ -105,6 +106,14 @@ class ShardedAudiosetDataset(IterableDataset):
         if pad_left > 0 or pad_right > 0:
             segment = torch.nn.functional.pad(segment, (0, 0, pad_left, pad_right))
         
+        if segment.shape[0] != target_length:
+            original_shape = segment.shape[0]
+            if segment.shape[0] < target_length:
+                pad_needed = target_length - segment.shape[0]
+                segment = torch.nn.functional.pad(segment, (0, 0, 0, pad_needed))
+            else:
+                segment = segment[:target_length, :]
+            logging.warning(f"Segment shape mismatch: got {original_shape}, expected {target_length}, corrected")
         return segment
 
     def flatten_dataset(self, data):
@@ -143,10 +152,12 @@ class ShardedAudiosetDataset(IterableDataset):
                     end = spectrogram_length
                     start = max(0, end - target_length)
                 fbank = full_fbank[start:end, :]
-                # Pad if needed
+                # Ensure exact target_length (pad or trim)
                 if fbank.shape[0] < target_length:
                     pad_len = target_length - fbank.shape[0]
                     fbank = torch.nn.functional.pad(fbank, (0, 0, 0, pad_len))
+                elif fbank.shape[0] > target_length:
+                    fbank = fbank[:target_length, :]
             
             # Normalize Audio
             if not self.skip_norm:
@@ -200,12 +211,18 @@ class ShardedAudiosetDataset(IterableDataset):
         for shard_path in shards_to_read:
             try:
                 data_list = torch.load(shard_path, weights_only=False, mmap=True)
-                if self.shuffle_shards: # Shuffle samples within shard
-                    random.shuffle(data_list)
-                    
-                for item in data_list:
-                    yield self.flatten_dataset(item)
-                    
             except Exception as e:
-                logging.warning(f"Error reading shard {shard_path}: {e}")
+                logging.warning(f"Error loading shard {shard_path}: {e}")
                 continue
+                
+            if self.shuffle_shards:  # Shuffle samples within shard
+                random.shuffle(data_list)
+                
+            for item in data_list:
+                try:
+                    yield self.flatten_dataset(item)
+                except Exception as e:
+                    video_id = item.get('video_id', 'unknown')
+                    logging.warning(f"Error processing sample {video_id} in {shard_path}: {e}")
+                    # Skip this sample, continue with next
+                    continue
