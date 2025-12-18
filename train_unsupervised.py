@@ -78,6 +78,40 @@ class CAVMAEModule(pl.LightningModule):
         intra_acc = outputs['c_acc']
         inter_acc = outputs['inter_acc']
         
+        cls_a = outputs.get('cls_a')
+        cls_v = outputs.get('cls_v')
+        if cls_a is not None and cls_v is not None:
+            with torch.no_grad():
+                # Normalize embeddings
+                cls_a_norm = torch.nn.functional.normalize(cls_a, dim=-1)
+                cls_v_norm = torch.nn.functional.normalize(cls_v, dim=-1)
+                
+                per_sample_sim = (cls_a_norm * cls_v_norm).sum(dim=-1)
+                
+                agg_method = self.hparams.get('sync_aggregation', 'all')
+                
+                if agg_method == 'all':
+                    # Log all aggregation methods
+                    self.log('train/sync/mean', per_sample_sim.mean(), on_step=True, on_epoch=True, prog_bar=True, logger=True)
+                    self.log('train/sync/min', per_sample_sim.min(), on_step=True, on_epoch=True, logger=True)
+                    self.log('train/sync/p10', torch.quantile(per_sample_sim, 0.1), on_step=True, on_epoch=True, logger=True)
+                    self.log('train/sync/p25', torch.quantile(per_sample_sim, 0.25), on_step=True, on_epoch=True, logger=True)
+                    self.log('train/sync/variance', per_sample_sim.var(), on_step=True, on_epoch=True, logger=True)
+                else:
+                    # Log only the specified method
+                    if agg_method == 'mean':
+                        sync_score = per_sample_sim.mean()
+                    elif agg_method == 'min':
+                        sync_score = per_sample_sim.min()
+                    elif agg_method == 'p10':
+                        sync_score = torch.quantile(per_sample_sim, 0.1)
+                    elif agg_method == 'p25':
+                        sync_score = torch.quantile(per_sample_sim, 0.25)
+                    else:
+                        sync_score = per_sample_sim.mean()
+                    self.log('train/sync_score', sync_score, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+                    self.log('train/sync/variance', per_sample_sim.var(), on_step=True, on_epoch=True, logger=True)
+        
         # Logging
         self.log('train/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log('train_loss_total', loss, on_step=True, on_epoch=True, logger=False) # For checkpoint filename
@@ -205,6 +239,8 @@ def get_args():
     parser.add_argument("--cls_token", action="store_true", help="Use CLS token")
     parser.add_argument("--num_register_tokens", type=int, default=8, help="Number of register tokens")
     parser.add_argument("--contrastive_heads", action="store_true", help="Use contrastive heads")
+    parser.add_argument("--sync_aggregation", type=str, default="all", choices=["all", "mean", "min", "p10", "p25"], 
+                        help="Aggregation method for sync score ('all' logs all methods)")
     
     # Training arguments
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
