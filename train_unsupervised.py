@@ -363,7 +363,7 @@ def main():
         # - find_unused_parameters: required when contrastive_heads may have unused params
         # - static_graph: DISABLED due to PyTorch bug (expect_autograd_hooks_ assertion)
         strategy = pl.strategies.DDPStrategy(
-            find_unused_parameters=args.contrastive_heads,
+            find_unused_parameters=True,
             gradient_as_bucket_view=True,
             static_graph=False
         )
