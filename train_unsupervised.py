@@ -329,7 +329,7 @@ def main():
     
     model = CAVMAEModule(args)
     
-    if getattr(args, 'gradient_checkpointing', True):
+    if getattr(args, 'gradient_checkpointing', False):
         model.model.enable_gradient_checkpointing()
         logging.info("Gradient checkpointing enabled")
     
@@ -359,10 +359,14 @@ def main():
     )
     
     if torch.cuda.is_available():
+        # DDP strategy configuration:
+        # - find_unused_parameters: required when contrastive_heads may have unused params
+        # - static_graph: only safe when graph is constant (no gradient_checkpointing or contrastive_heads)
+        use_static_graph = not (args.gradient_checkpointing or args.contrastive_heads)
         strategy = pl.strategies.DDPStrategy(
             find_unused_parameters=args.contrastive_heads,
             gradient_as_bucket_view=True,
-            static_graph=not args.contrastive_heads  # Safe when graph structure is constant
+            static_graph=use_static_graph
         )
     else:
         strategy = "auto"
