@@ -82,7 +82,13 @@ class CAVMAEModule(pl.LightningModule):
         cls_v = outputs.get('cls_v')
         if cls_a is not None and cls_v is not None:
             with torch.no_grad():
-                # Normalize embeddings
+                # Handle case where outputs are patch embeddings [batch, patches, embed]
+                # vs CLS tokens [batch, embed]
+                if cls_a.dim() == 3:
+                    cls_a = cls_a.mean(dim=1)
+                if cls_v.dim() == 3:
+                    cls_v = cls_v.mean(dim=1)
+                    
                 cls_a_norm = torch.nn.functional.normalize(cls_a, dim=-1)
                 cls_v_norm = torch.nn.functional.normalize(cls_v, dim=-1)
                 
