@@ -108,6 +108,9 @@ class CAVMAEModule(pl.LightningModule):
                     if batch_idx % log_freq == 0:
                         self.log('train/sync/mean_step', per_sample_sim.mean(), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
                         self.log('train/sync/min_step', per_sample_sim.min(), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
+                        self.log('train/sync/p10_step', torch.quantile(per_sample_sim, 0.1), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
+                        self.log('train/sync/p25_step', torch.quantile(per_sample_sim, 0.25), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
+                        self.log('train/sync/variance_step', per_sample_sim.var(), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
                 else:
                     # Log only the specified method
                     if agg_method == 'mean':
@@ -129,6 +132,7 @@ class CAVMAEModule(pl.LightningModule):
                     log_freq = self.hparams.get('log_freq', 100)
                     if batch_idx % log_freq == 0:
                          self.log('train/sync_score_step', sync_score, on_step=True, on_epoch=False, prog_bar=True, logger=True, batch_size=len(video_ids))
+                         self.log('train/sync/variance_step', per_sample_sim.var(), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
         
         # Logging
         self.log('train/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=len(video_ids))

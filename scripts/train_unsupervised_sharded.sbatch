@@ -69,7 +69,7 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --contrast_inter_weight 0.3 \
     --contrast_intra_weight 0.7 \
     --mae_loss_weight 1.0 \
-    --log_freq 100 \
+    --log_freq 10 \
     --cls_token \
     --num_register_tokens 8 \
     --gradient_accumulation_steps ${ACCUMULATION_STEPS}
