@@ -37,8 +37,7 @@ EPOCHS=10
 WARMUP_EPOCHS=1
 LR=1e-4
 # Gradient accumulation: effective_batch = BATCH_SIZE * ACCUMULATION_STEPS * NUM_GPUS
-# Default: 24 * 2 * 2 = 96 effective batch
-ACCUMULATION_STEPS=2
+ACCUMULATION_STEPS=8
 
 # 5. Multi-GPU / NCCL Optimizations
 export NCCL_DEBUG=WARN

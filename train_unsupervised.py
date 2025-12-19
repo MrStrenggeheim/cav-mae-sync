@@ -65,8 +65,6 @@ class CAVMAEModule(pl.LightningModule):
         
         forward_start = time.perf_counter()
         outputs = self(fbanks, images)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
         forward_time = time.perf_counter() - forward_start
         self._profile_forward_time += forward_time
         self._profile_step_count += 1
