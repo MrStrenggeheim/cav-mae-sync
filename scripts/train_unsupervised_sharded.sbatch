@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name="Train CAV-MAE-Sync Sharded"
 #SBATCH --nodes=1
-#SBATCH --cpus-per-gpu=5
+#SBATCH --cpus-per-gpu=10
 #SBATCH --gres=gpu:a40:2
 #SBATCH --mem=64G
 #SBATCH --time=72:00:00
@@ -31,7 +31,7 @@ SHARDED_DATASET_DIR=/storage/slurm/hunecke/fakesync/data/voxceleb2/preprocessed/
 SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_$(date +%Y%m%d_%H%M%S)
 
 # 4. Training Configuration
-BATCH_SIZE=20
+BATCH_SIZE=22
 TOTAL_FRAME=16
 EPOCHS=10
 WARMUP_EPOCHS=1
