@@ -103,10 +103,14 @@ class CAVMAEModule(pl.LightningModule):
                     self.log('train/sync/p25', torch.quantile(per_sample_sim, 0.25), on_step=False, on_epoch=True, logger=True, batch_size=len(video_ids))
                     self.log('train/sync/variance', per_sample_sim.var(), on_step=False, on_epoch=True, logger=True, batch_size=len(video_ids))
                     
-                    # 2. Step-level logging (sampled every 50 steps for visibility)
-                    if batch_idx % 50 == 0:
+                    # 2. Step-level logging (sampled every log_freq steps for visibility)
+                    log_freq = self.hparams.get('log_freq', 100)
+                    if batch_idx % log_freq == 0:
                         self.log('train/sync/mean_step', per_sample_sim.mean(), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
                         self.log('train/sync/min_step', per_sample_sim.min(), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
+                        self.log('train/sync/p10_step', torch.quantile(per_sample_sim, 0.1), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
+                        self.log('train/sync/p25_step', torch.quantile(per_sample_sim, 0.25), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
+                        self.log('train/sync/variance_step', per_sample_sim.var(), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
                 else:
                     # Log only the specified method
                     if agg_method == 'mean':
@@ -125,8 +129,10 @@ class CAVMAEModule(pl.LightningModule):
                     self.log('train/sync/variance', per_sample_sim.var(), on_step=False, on_epoch=True, logger=True, batch_size=len(video_ids))
                     
                     # Step log (sampled)
-                    if batch_idx % 50 == 0:
+                    log_freq = self.hparams.get('log_freq', 100)
+                    if batch_idx % log_freq == 0:
                          self.log('train/sync_score_step', sync_score, on_step=True, on_epoch=False, prog_bar=True, logger=True, batch_size=len(video_ids))
+                         self.log('train/sync/variance_step', per_sample_sim.var(), on_step=True, on_epoch=False, logger=True, batch_size=len(video_ids))
         
         # Logging
         self.log('train/loss/total', loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, batch_size=len(video_ids))
@@ -287,6 +293,13 @@ def get_args():
     parser.add_argument("--mean", type=float, default=-6.166528, help="Dataset mean")
     parser.add_argument("--std", type=float, default=3.483568, help="Dataset std")
     
+    # Dataloader robustness options
+    parser.add_argument("--use_mmap", action="store_true", 
+                        help="Use memory-mapped I/O for shard loading. Only enable for local SSD/NVMe. "
+                             "Disabled by default for network storage (NFS/Lustre) compatibility.")
+    parser.add_argument("--dataset_fraction", type=float, default=1.0,
+                        help="Fraction of dataset to use (0.0-1.0). Useful for quick testing. Default: 1.0 (full)")
+    
     return parser.parse_args()
 
 def main():
@@ -330,7 +343,9 @@ def main():
         from src.dataloader_sharded import ShardedAudiosetDataset
         dataset = ShardedAudiosetDataset(
             shard_dir=args.sharded_dataset_dir,
-            audio_conf=audio_conf
+            audio_conf=audio_conf,
+            use_mmap=args.use_mmap,
+            dataset_fraction=args.dataset_fraction
         )
         dataloader = DataLoader(
             dataset,
@@ -388,7 +403,7 @@ def main():
     tb_logger = TensorBoardLogger(
         save_dir=args.save_path,
         name='tensorboard',
-        version=''
+        version=None
     )
     
     if torch.cuda.is_available():
@@ -430,6 +445,11 @@ def main():
     )
 
     
+    
+    # Log the exact path where TensorBoard events will be written
+    if trainer.is_global_zero:
+        logging.info(f"TensorBoard Logger initialized. Logs will be written to: {tb_logger.log_dir}")
+        
     ckpt_path = args.resume
     if args.resume and os.path.exists(args.resume):
         logging.info(f"Checking checkpoint: {args.resume}")
