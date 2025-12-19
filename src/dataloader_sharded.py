@@ -70,6 +70,9 @@ class ShardedAudiosetDataset(IterableDataset):
         logging.info(f"Estimated total samples in dataset: {self._total_samples}")
     
     def __len__(self):
+        # In DDP, each rank only sees a subset of shards
+        if torch.distributed.is_initialized():
+            return self._total_samples // torch.distributed.get_world_size()
         return self._total_samples
 
     def slice_fbank_at_timestamp(self, full_fbank, fbank_length, timestamp_ms, target_length):
