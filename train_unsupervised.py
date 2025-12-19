@@ -293,6 +293,13 @@ def get_args():
     parser.add_argument("--mean", type=float, default=-6.166528, help="Dataset mean")
     parser.add_argument("--std", type=float, default=3.483568, help="Dataset std")
     
+    # Dataloader robustness options
+    parser.add_argument("--use_mmap", action="store_true", 
+                        help="Use memory-mapped I/O for shard loading. Only enable for local SSD/NVMe. "
+                             "Disabled by default for network storage (NFS/Lustre) compatibility.")
+    parser.add_argument("--dataset_fraction", type=float, default=1.0,
+                        help="Fraction of dataset to use (0.0-1.0). Useful for quick testing. Default: 1.0 (full)")
+    
     return parser.parse_args()
 
 def main():
@@ -336,7 +343,9 @@ def main():
         from src.dataloader_sharded import ShardedAudiosetDataset
         dataset = ShardedAudiosetDataset(
             shard_dir=args.sharded_dataset_dir,
-            audio_conf=audio_conf
+            audio_conf=audio_conf,
+            use_mmap=args.use_mmap,
+            dataset_fraction=args.dataset_fraction
         )
         dataloader = DataLoader(
             dataset,
