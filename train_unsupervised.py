@@ -240,9 +240,8 @@ def get_args():
         # If running on multiple GPUs on this node, divide workers
         ngpus = torch.cuda.device_count()
         if ngpus > 1:
-            # Leave 2 cores per GPU for Main Process/System overhead to prevent starvation
-            default_workers = max(1, (total_cpus // ngpus) - 2)
-            logging.info(f"Auto-detected {total_cpus} CPUs and {ngpus} GPUs. Setting default workers to {default_workers} per GPU (leaving spare cores).")
+            default_workers = max(1, total_cpus // ngpus)
+            logging.info(f"Auto-detected {total_cpus} CPUs and {ngpus} GPUs. Setting default workers to {default_workers} per GPU.")
         else:
             default_workers = total_cpus
             
@@ -393,11 +392,12 @@ def main():
     )
     
     if torch.cuda.is_available():
-        # DDP strategy: Optimized for static graph since all params are used in contrastive+mae
+        # DDP strategy: find_unused_parameters=True required because model has
+        # conditional parameter usage (e.g., contrastive heads, different return paths)
         strategy = pl.strategies.DDPStrategy(
-            find_unused_parameters=False,
+            find_unused_parameters=True,
             gradient_as_bucket_view=True,
-            static_graph=True
+            static_graph=False
         )
     else:
         strategy = "auto"
