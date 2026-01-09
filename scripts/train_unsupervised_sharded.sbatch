@@ -52,6 +52,7 @@ echo "Starting training..."
 echo "Project Path: ${PROJECT_PATH}"
 echo "Sharded Dataset Dir: ${SHARDED_DATASET_DIR}"
 echo "Save Path: ${SAVE_PATH}"
+echo "Batch Size: ${BATCH_SIZE}"
 
 python3 ${PROJECT_PATH}/train_unsupervised.py \
     --sharded_dataset_dir ${SHARDED_DATASET_DIR} \
@@ -69,10 +70,11 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --contrast_inter_weight 0.3 \
     --contrast_intra_weight 0.7 \
     --mae_loss_weight 1.0 \
-    --log_freq 10 \
+    --log_freq 4 \
     --cls_token \
     --num_register_tokens 8 \
-    --gradient_accumulation_steps ${ACCUMULATION_STEPS}
+    --gradient_accumulation_steps ${ACCUMULATION_STEPS} \
+    # --dataset_fraction 0.01
     # --fast_dev_run \
 
 echo "Training finished at $(date) with exit code $?"
