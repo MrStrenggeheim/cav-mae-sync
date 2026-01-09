@@ -13,20 +13,35 @@ import math
 import numpy as np
 
 class ShardedAudiosetDataset(IterableDataset):
-    def __init__(self, shard_dir, audio_conf, shuffle_shards=True):
+    def __init__(self, shard_dir, audio_conf, shuffle_shards=True, use_mmap=False, dataset_fraction=1.0):
         """
         Args:
             shard_dir (str): Directory containing .pt shards
             audio_conf (dict): Configuration dictionary (matching AudiosetDataset)
             shuffle_shards (bool): Whether to shuffle list of shards
+            use_mmap (bool): Use memory-mapped I/O for loading shards. 
+                             Default False (safer for network storage like NFS/Lustre).
+                             Set True only for local SSD/NVMe storage.
+            dataset_fraction (float): Fraction of dataset to use (0.0-1.0). 
+                                      Useful for fast testing. Default 1.0 (full dataset).
         """
         self.shard_dir = shard_dir
         self.audio_conf = audio_conf
         self.shuffle_shards = shuffle_shards
+        self.use_mmap = use_mmap
+        self.dataset_fraction = max(0.0, min(1.0, dataset_fraction))  # Clamp to [0, 1]
         
-        self.shards = sorted(glob.glob(os.path.join(shard_dir, "shard_*.pt")))
-        if not self.shards:
+        all_shards = sorted(glob.glob(os.path.join(shard_dir, "shard_*.pt")))
+        if not all_shards:
             raise FileNotFoundError(f"No shards found in {shard_dir}")
+        
+        # Apply dataset_fraction by selecting a subset of shards
+        if self.dataset_fraction < 1.0:
+            num_shards_to_use = max(1, int(len(all_shards) * self.dataset_fraction))
+            self.shards = all_shards[:num_shards_to_use]
+            logging.info(f"Using {self.dataset_fraction*100:.1f}% of dataset: {len(self.shards)}/{len(all_shards)} shards")
+        else:
+            self.shards = all_shards
             
         logging.info(f"Found {len(self.shards)} shards.")
         
@@ -35,6 +50,7 @@ class ShardedAudiosetDataset(IterableDataset):
         self.norm_std = audio_conf.get('std')
         self.skip_norm = audio_conf.get('skip_norm', False)
         self.target_length = audio_conf.get('target_length', 48)
+        self.num_mel_bins = audio_conf.get('num_mel_bins', 128)
         
         # Standard ImageNet normalization
         self.normalize = T.Normalize(
@@ -173,6 +189,22 @@ class ShardedAudiosetDataset(IterableDataset):
             if not self.skip_norm:
                  fbank = (fbank - self.norm_mean) / self.norm_std
 
+            # Defensive shape validation to prevent torch.stack failures
+            expected_shape = (target_length, self.num_mel_bins)
+            if fbank.shape != expected_shape:
+                # Fix shape by padding/truncating
+                t, f = fbank.shape
+                if f != self.num_mel_bins:
+                    if f < self.num_mel_bins:
+                        fbank = torch.nn.functional.pad(fbank, (0, self.num_mel_bins - f))
+                    else:
+                        fbank = fbank[:, :self.num_mel_bins]
+                if t != target_length:
+                    if t < target_length:
+                        fbank = torch.nn.functional.pad(fbank, (0, 0, 0, target_length - t))
+                    else:
+                        fbank = fbank[:target_length, :]
+
             fbanks.append(fbank)
             
             try:
@@ -187,7 +219,7 @@ class ShardedAudiosetDataset(IterableDataset):
             fbanks = torch.stack(fbanks)
             images = torch.stack(images)
         else:
-             fbanks = torch.zeros(len(frame_indices), self.target_length, 128)
+             fbanks = torch.zeros(len(frame_indices), self.target_length, self.num_mel_bins)
              images = torch.zeros(len(frame_indices), 3, self.im_res, self.im_res)
 
         return fbanks, images, data['video_id'], torch.tensor(frame_indices)
@@ -222,7 +254,7 @@ class ShardedAudiosetDataset(IterableDataset):
             
         for shard_path in shards_to_read:
             try:
-                data_list = torch.load(shard_path, weights_only=False, mmap=True)
+                data_list = torch.load(shard_path, weights_only=False, mmap=self.use_mmap)
             except Exception as e:
                 logging.warning(f"Error loading shard {shard_path}: {e}")
                 continue
