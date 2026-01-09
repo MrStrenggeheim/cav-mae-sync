@@ -68,12 +68,19 @@ class ShardedAudiosetDataset(IterableDataset):
             except Exception:
                 pass
         logging.info(f"Estimated total samples in dataset: {self._total_samples}")
+        
+        # Cache distributed info in __init__ (main process) to avoid calling in workers
+        if torch.distributed.is_initialized():
+            self._rank = torch.distributed.get_rank()
+            self._world_size = torch.distributed.get_world_size()
+        else:
+            self._rank = 0
+            self._world_size = 1
+        logging.info(f"Dataset initialized for rank {self._rank}/{self._world_size}")
     
     def __len__(self):
         # In DDP, each rank only sees a subset of shards
-        if torch.distributed.is_initialized():
-            return self._total_samples // torch.distributed.get_world_size()
-        return self._total_samples
+        return self._total_samples // self._world_size
 
     def slice_fbank_at_timestamp(self, full_fbank, fbank_length, timestamp_ms, target_length):
         """
@@ -188,9 +195,11 @@ class ShardedAudiosetDataset(IterableDataset):
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
         
-        if torch.distributed.is_initialized():
-            rank = torch.distributed.get_rank()
-            world_size = torch.distributed.get_world_size()
+        # Use cached rank/world_size from __init__ (avoids distributed calls in workers)
+        rank = self._rank
+        world_size = self._world_size
+        
+        if world_size > 1:
             per_rank = int(math.ceil(len(self.shards) / float(world_size)))
             rank_start = rank * per_rank
             rank_end = min(rank_start + per_rank, len(self.shards))
