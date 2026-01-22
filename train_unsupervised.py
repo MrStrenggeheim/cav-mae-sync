@@ -37,6 +37,9 @@ class CAVMAEModule(pl.LightningModule):
         self._profile_forward_time = 0.0
         self._profile_step_count = 0
         self._batch_start_time = None
+        
+        # DDP sync: max batches per epoch (set by DDPBatchSyncCallback)
+        self.max_batches_per_epoch = None
 
     def on_train_batch_start(self, batch, batch_idx):
         import time
@@ -61,6 +64,16 @@ class CAVMAEModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         import time
+        
+        # DDP sync: Stop early if we've reached max batches for this epoch
+        # This ensures all ranks process the same number of batches
+        # Note: We set should_stop at the END of this step, not before processing,
+        # to ensure that all ranks complete the same number of forward/backward passes
+        should_stop_after_this = (
+            self.max_batches_per_epoch is not None and 
+            batch_idx >= self.max_batches_per_epoch - 1  # -1 because batch_idx is 0-indexed
+        )
+        
         fbanks, images, video_ids, frame_indices = batch
         
         forward_start = time.perf_counter()
@@ -168,6 +181,11 @@ class CAVMAEModule(pl.LightningModule):
             self._profile_forward_time = 0.0
             self._profile_step_count = 0
         
+        # DDP sync: Signal to stop after this batch if we've reached the limit
+        if should_stop_after_this:
+            self.trainer.should_stop = True
+            logging.info(f"Reached max_batches_per_epoch ({self.max_batches_per_epoch}), stopping epoch")
+        
         return loss
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
@@ -225,6 +243,125 @@ class CAVMAEModule(pl.LightningModule):
             }
 
         return optimizer
+
+
+class CAVMAEDataModule(pl.LightningDataModule):
+    """
+    LightningDataModule for CAV-MAE training with proper DDP support.
+
+    Uses Lightning's limit_train_batches to ensure all ranks process the same
+    number of batches per epoch, preventing NCCL deadlocks.
+    """
+    def __init__(self, args, audio_conf):
+        super().__init__()
+        self.args = args
+        self.audio_conf = audio_conf
+        self.dataset = None
+        self.min_batches_per_epoch = None  # Set during setup()
+        self.discarded_samples_info = None  # For logging
+
+    def setup(self, stage=None):
+        """
+        Called after DDP initialization on each process.
+        Creates the dataset and computes synchronized batch count.
+        """
+        import torch.distributed as dist
+
+        if self.args.sharded_dataset_dir:
+            from src.dataloader_sharded import ShardedAudiosetDataset
+
+            # Get rank and world_size from trainer (available after DDP init)
+            if self.trainer and hasattr(self.trainer, 'global_rank'):
+                rank = self.trainer.global_rank
+                world_size = self.trainer.world_size
+            elif dist.is_initialized():
+                rank = dist.get_rank()
+                world_size = dist.get_world_size()
+            else:
+                rank = int(os.environ.get('RANK', 0))
+                world_size = int(os.environ.get('WORLD_SIZE', 1))
+
+            logging.info(f"DataModule setup: rank={rank}, world_size={world_size}")
+
+            # Create dataset with explicit rank/world_size (NO max_samples - we limit at Trainer level)
+            self.dataset = ShardedAudiosetDataset(
+                shard_dir=self.args.sharded_dataset_dir,
+                audio_conf=self.audio_conf,
+                use_mmap=self.args.use_mmap,
+                dataset_fraction=self.args.dataset_fraction,
+                rank=rank,
+                world_size=world_size
+            )
+
+            # Compute synchronized batch count for DDP
+            if world_size > 1:
+                local_samples = self.dataset.count_samples_for_rank()
+                batch_size = self.args.batch_size
+                local_batches = local_samples // batch_size
+                
+                logging.info(f"Rank {rank}: {local_samples} samples -> {local_batches} batches (batch_size={batch_size})")
+
+                # Sync minimum batch count across all ranks
+                batch_tensor = torch.tensor([local_batches], dtype=torch.long,
+                                          device='cuda' if torch.cuda.is_available() else 'cpu')
+                dist.all_reduce(batch_tensor, op=dist.ReduceOp.MIN)
+                self.min_batches_per_epoch = batch_tensor.item()
+
+                # Log discarded samples for monitoring
+                used_samples = self.min_batches_per_epoch * batch_size
+                discarded = local_samples - used_samples
+                pct = (discarded / local_samples * 100) if local_samples > 0 else 0
+                
+                self.discarded_samples_info = {
+                    'rank': rank,
+                    'local_samples': local_samples,
+                    'used_samples': used_samples,
+                    'discarded': discarded,
+                    'discard_pct': pct
+                }
+                
+                logging.info(
+                    f"Rank {rank}: DDP sync -> {self.min_batches_per_epoch} batches/epoch "
+                    f"(discarding {discarded} samples = {pct:.1f}%)"
+                )
+            else:
+                # Single GPU: use all available batches
+                local_samples = self.dataset.count_samples_for_rank()
+                self.min_batches_per_epoch = local_samples // self.args.batch_size
+                logging.info(f"Single GPU: {self.min_batches_per_epoch} batches/epoch")
+        else:
+            # Non-sharded dataset (legacy JSON-based)
+            self.dataset = AudiosetDataset(
+                dataset_json_file=self.args.dataset_json,
+                audio_conf=self.audio_conf,
+                label_csv=self.args.label_csv
+            )
+            self.min_batches_per_epoch = None  # Let DataLoader handle it
+
+    def train_dataloader(self):
+        if self.args.sharded_dataset_dir:
+            return DataLoader(
+                self.dataset,
+                batch_size=self.args.batch_size,
+                num_workers=self.args.num_workers,
+                collate_fn=unsupervised_collate_fn,
+                pin_memory=True,
+                drop_last=True,
+                persistent_workers=True if self.args.num_workers > 0 else False,
+                prefetch_factor=4 if self.args.num_workers > 0 else None
+            )
+        else:
+            return DataLoader(
+                self.dataset,
+                batch_size=self.args.batch_size,
+                shuffle=True,
+                num_workers=self.args.num_workers,
+                collate_fn=unsupervised_collate_fn,
+                pin_memory=True,
+                drop_last=True,
+                persistent_workers=True if self.args.num_workers > 0 else False
+            )
+
 
 def get_args():
     parser = argparse.ArgumentParser(description="Train CAV-MAE Sync Unsupervised (Lightning)")
@@ -339,41 +476,9 @@ def main():
     logging.info("Audio Configuration:")
     logging.info(audio_conf)
     
-    if args.sharded_dataset_dir:
-        from src.dataloader_sharded import ShardedAudiosetDataset
-        dataset = ShardedAudiosetDataset(
-            shard_dir=args.sharded_dataset_dir,
-            audio_conf=audio_conf,
-            use_mmap=args.use_mmap,
-            dataset_fraction=args.dataset_fraction
-        )
-        dataloader = DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            num_workers=args.num_workers,
-            collate_fn=unsupervised_collate_fn,
-            pin_memory=True,
-            drop_last=True,
-            persistent_workers=True if args.num_workers > 0 else False,
-            prefetch_factor=4 if args.num_workers > 0 else None  # Increase prefetching for network storage
-        )
-    else:
-        dataset = AudiosetDataset(
-            dataset_json_file=args.dataset_json,
-            audio_conf=audio_conf,
-            label_csv=args.label_csv
-        )
-        
-        dataloader = DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            shuffle=True,
-            num_workers=args.num_workers,
-            collate_fn=unsupervised_collate_fn,
-            pin_memory=True,  #  TODO: Check if this works
-            drop_last=True,
-            persistent_workers=True if args.num_workers > 0 else False
-        )
+    # Create DataModule - dataset creation happens in setup() after DDP initialization
+    # This is critical for proper DDP synchronization with IterableDataset
+    data_module = CAVMAEDataModule(args, audio_conf)
     
     model = CAVMAEModule(args)
     
@@ -427,6 +532,44 @@ def main():
         else:
             precision = "16-mixed"
             logging.info(f"Using float16 precision (GPU compute capability {device_capability[0]}.{device_capability[1]} < 8.0)")
+    # Note: We cannot call data_module.setup() here because DDP is not initialized yet.
+    # Lightning calls setup() after DDP init. The min_batches_per_epoch is computed there
+    # and we need to update limit_train_batches dynamically.
+    # 
+    # SOLUTION: Use a Callback to update trainer.limit_train_batches after setup() runs.
+    
+    class DDPBatchSyncCallback(pl.Callback):
+        """Callback to sync batch counts across DDP ranks after datamodule setup.
+        
+        This provides two layers of DDP synchronization:
+        1. Sets trainer.limit_train_batches (if Lightning respects it at runtime)
+        2. Sets pl_module.max_batches_per_epoch (checked in training_step as failsafe)
+        """
+        
+        def on_train_start(self, trainer, pl_module):
+            """Called after setup() and before training starts."""
+            if hasattr(trainer.datamodule, 'min_batches_per_epoch'):
+                min_batches = trainer.datamodule.min_batches_per_epoch
+                if min_batches is not None:
+                    # Layer 1: Update trainer's limit
+                    trainer.limit_train_batches = min_batches
+                    
+                    # Layer 2: Set on the module for training_step failsafe
+                    if hasattr(pl_module, 'max_batches_per_epoch'):
+                        pl_module.max_batches_per_epoch = min_batches
+                    
+                    logging.info(f"DDPBatchSyncCallback: Synced to {min_batches} batches/epoch")
+                    
+                    # Log discarded samples info if available
+                    if trainer.datamodule.discarded_samples_info:
+                        info = trainer.datamodule.discarded_samples_info
+                        logging.info(
+                            f"Rank {info['rank']}: Using {info['used_samples']} samples, "
+                            f"discarding {info['discarded']} ({info['discard_pct']:.1f}%)"
+                        )
+    
+    # Add to callbacks
+    ddp_sync_callback = DDPBatchSyncCallback()
     
     trainer = pl.Trainer(
         max_epochs=args.epochs,
@@ -434,14 +577,12 @@ def main():
         devices="auto" if torch.cuda.is_available() else 1,
         strategy=strategy,
         precision=precision,
-        callbacks=[checkpoint_callback, lr_monitor],
+        callbacks=[checkpoint_callback, lr_monitor, ddp_sync_callback],
         logger=tb_logger,
         log_every_n_steps=args.log_freq,
         default_root_dir=args.save_path,
         fast_dev_run=args.fast_dev_run,
-        # gradient_clip_val=1.0,  # could also test this
         accumulate_grad_batches=args.gradient_accumulation_steps,
-        # Resume training if checkpoint provided
     )
 
     
@@ -574,12 +715,8 @@ def main():
             logging.error(f"Failed to inspect checkpoint {args.resume}. Error: {e}")
             raise
 
-    try:
-        num_samples = len(dataset)
-    except TypeError:
-        num_samples = "unknown"
-    logging.info(f"Starting training with {num_samples} videos...")
-    trainer.fit(model, dataloader, ckpt_path=ckpt_path)
+    logging.info("Starting training...")
+    trainer.fit(model, datamodule=data_module, ckpt_path=ckpt_path)
 
 if __name__ == "__main__":
     main()

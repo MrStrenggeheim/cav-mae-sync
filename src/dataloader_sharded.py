@@ -1,5 +1,6 @@
 
 import os
+import json
 import torch
 import torch.utils.data
 from torch.utils.data import IterableDataset
@@ -13,18 +14,24 @@ import math
 import numpy as np
 
 class ShardedAudiosetDataset(IterableDataset):
-    def __init__(self, shard_dir, audio_conf, shuffle_shards=True, use_mmap=False, dataset_fraction=1.0):
+    def __init__(self, shard_dir, audio_conf, shuffle_shards=True, use_mmap=False, dataset_fraction=1.0,
+                 rank=None, world_size=None, max_samples=None):
         """
         Args:
             shard_dir (str): Directory containing .pt shards
             audio_conf (dict): Configuration dictionary (matching AudiosetDataset)
             shuffle_shards (bool): Whether to shuffle list of shards
-            use_mmap (bool): Use memory-mapped I/O for loading shards. 
+            use_mmap (bool): Use memory-mapped I/O for loading shards.
                              Default False (safer for network storage like NFS/Lustre).
                              Set True only for local SSD/NVMe storage.
-            dataset_fraction (float): Fraction of dataset to use (0.0-1.0). 
+            dataset_fraction (float): Fraction of dataset to use (0.0-1.0).
                                       Useful for fast testing. Default 1.0 (full dataset).
+            rank (int, optional): DDP rank. If None, auto-detected from env vars or torch.distributed.
+            world_size (int, optional): DDP world size. If None, auto-detected.
+            max_samples (int, optional): Maximum samples to yield per epoch. Used to ensure
+                                         equal iteration length across DDP ranks. If None, no limit.
         """
+        self.max_samples = max_samples
         self.shard_dir = shard_dir
         self.audio_conf = audio_conf
         self.shuffle_shards = shuffle_shards
@@ -85,18 +92,101 @@ class ShardedAudiosetDataset(IterableDataset):
                 pass
         logging.info(f"Estimated total samples in dataset: {self._total_samples}")
         
-        # Cache distributed info in __init__ (main process) to avoid calling in workers
-        if torch.distributed.is_initialized():
+        # Determine rank and world_size for DDP
+        # Priority: explicit args > torch.distributed > env vars > defaults
+        if rank is not None and world_size is not None:
+            self._rank = rank
+            self._world_size = world_size
+        elif torch.distributed.is_initialized():
             self._rank = torch.distributed.get_rank()
             self._world_size = torch.distributed.get_world_size()
         else:
-            self._rank = 0
-            self._world_size = 1
-        logging.info(f"Dataset initialized for rank {self._rank}/{self._world_size}")
+            # Fallback to environment variables (set by torchrun/DDP launcher)
+            # This is the standard pattern for IterableDataset + DDP
+            self._rank = int(os.environ.get('RANK', 0))
+            self._world_size = int(os.environ.get('WORLD_SIZE', 1))
+        
+        # Load shard metadata if available (for efficient sample counting)
+        self._shard_metadata = self._load_shard_metadata()
+        logging.info(f"Dataset initialized for rank {self._rank}/{self._world_size} (max_samples={self.max_samples}, has_metadata={self._shard_metadata is not None})")
+    
+    def _load_shard_metadata(self):
+        """Load per-shard sample counts from metadata file if available."""
+        metadata_path = os.path.join(self.shard_dir, 'sharded_dataset.json')
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+                if 'shard_sample_counts' in metadata:
+                    logging.info(f"Loaded shard metadata with {len(metadata['shard_sample_counts'])} shard counts")
+                    return metadata['shard_sample_counts']
+            except Exception as e:
+                logging.warning(f"Failed to load shard metadata: {e}")
+        return None
     
     def __len__(self):
         # In DDP, each rank only sees a subset of shards
+        if self.max_samples is not None:
+            return self.max_samples
         return self._total_samples // self._world_size
+
+    def count_samples_for_rank(self):
+        """
+        Count actual number of samples in shards assigned to this rank.
+        Uses metadata if available, otherwise falls back to loading shards (slow).
+
+        Returns:
+            int: Total samples in this rank's shards
+        """
+        # Compute which shards this rank owns
+        if self._world_size > 1:
+            per_rank = int(math.ceil(len(self.shards) / float(self._world_size)))
+            rank_start = self._rank * per_rank
+            rank_end = min(rank_start + per_rank, len(self.shards))
+            shards_for_rank = self.shards[rank_start:rank_end]
+        else:
+            shards_for_rank = self.shards
+
+        # Use metadata if available (O(1) per shard, no memory load)
+        if self._shard_metadata is not None:
+            total = 0
+            missing_metadata = []
+            for shard_path in shards_for_rank:
+                shard_name = os.path.basename(shard_path)
+                if shard_name in self._shard_metadata:
+                    total += self._shard_metadata[shard_name]
+                else:
+                    missing_metadata.append(shard_name)
+            
+            if missing_metadata:
+                logging.warning(f"Missing metadata for {len(missing_metadata)} shards, loading them to count (slow)")
+                for shard_path in shards_for_rank:
+                    if os.path.basename(shard_path) in missing_metadata:
+                        try:
+                            data_list = torch.load(shard_path, weights_only=False)
+                            total += len(data_list)
+                        except Exception as e:
+                            logging.warning(f"Error counting samples in {shard_path}: {e}")
+            return total
+
+        # Fallback: no metadata, load all shards (SLOW - logs warning)
+        logging.warning(
+            "No shard metadata found! Loading ALL shards to count samples. "
+            "This is SLOW and memory-intensive. Run: python scripts/generate_shard_metadata.py --shard_dir <path>"
+        )
+        total = 0
+        for shard_path in shards_for_rank:
+            try:
+                data_list = torch.load(shard_path, weights_only=False, mmap=self.use_mmap)
+                total += len(data_list)
+            except Exception as e:
+                logging.warning(f"Error counting samples in {shard_path}: {e}")
+        return total
+
+    def set_max_samples(self, max_samples):
+        """Set the maximum samples per epoch (used for DDP sync)."""
+        self.max_samples = max_samples
+        logging.info(f"Rank {self._rank}: set max_samples={max_samples}")
 
     def slice_fbank_at_timestamp(self, full_fbank, fbank_length, timestamp_ms, target_length):
         """
@@ -226,11 +316,12 @@ class ShardedAudiosetDataset(IterableDataset):
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
-        
-        # Use cached rank/world_size from __init__ (avoids distributed calls in workers)
+
+        # Use rank/world_size set in __init__
         rank = self._rank
         world_size = self._world_size
-        
+
+        # Partition shards by rank
         if world_size > 1:
             per_rank = int(math.ceil(len(self.shards) / float(world_size)))
             rank_start = rank * per_rank
@@ -239,34 +330,41 @@ class ShardedAudiosetDataset(IterableDataset):
             logging.info(f"Rank {rank}/{world_size}: assigned shards [{rank_start}:{rank_end}] ({len(shards_for_rank)} shards)")
         else:
             shards_for_rank = self.shards
-        
+
+        # Partition shards by worker
         if worker_info is None:
             shards_to_read = shards_for_rank
+            num_workers = 1
+            worker_id = 0
         else:
-            per_worker = int(math.ceil(len(shards_for_rank) / float(worker_info.num_workers)))
-            iter_start = worker_info.id * per_worker
+            num_workers = worker_info.num_workers
+            worker_id = worker_info.id
+            per_worker = int(math.ceil(len(shards_for_rank) / float(num_workers)))
+            iter_start = worker_id * per_worker
             iter_end = min(iter_start + per_worker, len(shards_for_rank))
             shards_to_read = shards_for_rank[iter_start:iter_end]
-            logging.info(f"Worker {worker_info.id}/{worker_info.num_workers}: assigned {len(shards_to_read)} shards")
-            
+            logging.info(f"Worker {worker_id}/{num_workers}: assigned {len(shards_to_read)} shards")
+
         if self.shuffle_shards:
             random.shuffle(shards_to_read)
-            
+
+        # Note: Batch limiting is handled at Trainer level via limit_train_batches
+        # This provides proper DDP synchronization across all ranks
         for shard_path in shards_to_read:
             try:
                 data_list = torch.load(shard_path, weights_only=False, mmap=self.use_mmap)
             except Exception as e:
                 logging.warning(f"Error loading shard {shard_path}: {e}")
                 continue
-                
-            if self.shuffle_shards:  # Shuffle samples within shard
+
+            if self.shuffle_shards:
                 random.shuffle(data_list)
-                
+
             for item in data_list:
                 try:
                     yield self.flatten_dataset(item)
                 except Exception as e:
                     video_id = item.get('video_id', 'unknown')
                     logging.warning(f"Error processing sample {video_id} in {shard_path}: {e}")
-                    # Skip this sample, continue with next
                     continue
+

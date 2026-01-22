@@ -46,7 +46,6 @@ export NCCL_SOCKET_NTHREADS=4
 export NCCL_NSOCKS_PERTHREAD=4
 export TORCH_NCCL_BLOCKING_WAIT=1
 export NCCL_ASYNC_ERROR_HANDLING=1
-# Use unique port per job to avoid "Address already in use" errors
 export MASTER_PORT=$((29500 + SLURM_JOB_ID % 1000))
 
 echo "Starting training..."
@@ -74,8 +73,9 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --log_freq 4 \
     --cls_token \
     --num_register_tokens 8 \
-    --gradient_accumulation_steps ${ACCUMULATION_STEPS} \
+    --gradient_accumulation_steps ${ACCUMULATION_STEPS}
+    # Optional flags:
     # --dataset_fraction 0.01
-    # --fast_dev_run \
+    # --fast_dev_run
 
 echo "Training finished at $(date) with exit code $?"

@@ -271,6 +271,9 @@ def main():
     
     os.makedirs(args.output_dir, exist_ok=True)
     
+    # Track per-shard sample counts for DDP sync metadata
+    shard_sample_counts = {}
+    
     # Outer progress bar for shards (Slurm-compatible with mininterval)
     num_actual_shards = min(args.num_shards, int(np.ceil(total_files / shard_size)))
     pbar_shards = tqdm(range(num_actual_shards), desc="Shards", mininterval=10, file=sys.stdout)
@@ -306,13 +309,16 @@ def main():
         if len(valid_samples) > 0:
             tqdm.write(f"Saving {len(valid_samples)} samples to {shard_output_path}")
             torch.save(valid_samples, shard_output_path)
+            shard_sample_counts[f"shard_{shard_id:04d}.pt"] = len(valid_samples)
         else:
             tqdm.write(f"WARNING: No valid samples for shard {shard_id}!")
 
-    # Save metadata
+    # Save metadata with per-shard counts (for efficient DDP sync)
     metadata = {
         'num_shards': args.num_shards,
         'total_files': total_files,
+        'total_samples': sum(shard_sample_counts.values()),
+        'shard_sample_counts': shard_sample_counts,
         'args': vars(args)
     }
     with open(os.path.join(args.output_dir, 'sharded_dataset.json'), 'w') as f:
