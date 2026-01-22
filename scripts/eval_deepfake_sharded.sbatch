@@ -35,7 +35,7 @@ OUTPUT_CSV=${OUTPUT_DIR}/eval_results.csv
 # 4. Evaluation Configuration
 BATCH_SIZE=1
 TOTAL_FRAME=16
-TARGET_LENGTH=42
+TARGET_LENGTH=48
 
 # Normalization stats (should match training)
 MEAN=-4.050048828125
@@ -61,7 +61,9 @@ python3 ${PROJECT_PATH}/eval_deepfake.py \
     --target_length ${TARGET_LENGTH} \
     --num_workers 8 \
     --mean ${MEAN} \
-    --std ${STD}
+    --std ${STD} \
+    --no_masking
+    # Optional: --label_csv /path/to/labels.csv for AUC-ROC
 
 echo "Evaluation finished at $(date) with exit code $?"
 echo "Results saved to ${OUTPUT_CSV}"
