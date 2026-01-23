@@ -34,8 +34,8 @@ SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_$(date 
 # 4. Training Configuration
 BATCH_SIZE=18
 TOTAL_FRAME=16
-EPOCHS=10
-WARMUP_EPOCHS=1
+EPOCHS=20
+WARMUP_EPOCHS=2
 LR=1e-4
 # Gradient accumulation: effective_batch = BATCH_SIZE * ACCUMULATION_STEPS * NUM_GPUS
 ACCUMULATION_STEPS=8
