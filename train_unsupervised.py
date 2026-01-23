@@ -324,6 +324,9 @@ class CAVMAEDataModule(pl.LightningDataModule):
                     f"Rank {rank}: DDP sync -> {self.min_batches_per_epoch} batches/epoch "
                     f"(discarding {discarded} samples = {pct:.1f}%)"
                 )
+
+                # Enforce per-worker sample limiting to prevent DataLoader hangs
+                self.dataset.set_max_samples(used_samples)
             else:
                 # Single GPU: use all available batches
                 local_samples = self.dataset.count_samples_for_rank()
@@ -425,6 +428,7 @@ def get_args():
     parser.add_argument("--checkpoint_interval_hours", type=float, default=1.0, help="Save checkpoint every N hours")
     parser.add_argument("--gradient_checkpointing", action="store_true", help="Enable gradient checkpointing (default: True)")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="Accumulate gradients over N steps (simulate larger batch)")
+    parser.add_argument("--use_mmap", action="store_true", help="Use mmap for loading shards (reduces memory usage)")
     
     # Audio Conf defaults
     parser.add_argument("--num_mel_bins", type=int, default=128, help="Number of mel bins")

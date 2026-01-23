@@ -290,24 +290,39 @@ For each video:
 
 ### FIXED: Multi-GPU Training Hangs After 30-45 Minutes
 
-**Root Cause**: With `IterableDataset` and DDP, different ranks had different numbers of samples due to unequal shard sizes. When one rank exhausted its data, it moved to epoch-end sync operations while the other rank was still doing gradient sync → NCCL ALLREDUCE mismatch → deadlock → timeout.
+**Root Cause**: With `IterableDataset` and DDP, workers within a rank could exhaust at different times due to uneven shard-to-worker assignment. This caused DataLoader behavior issues that led to ranks diverging mid-epoch, resulting in NCCL ALLREDUCE mismatch → deadlock → timeout.
 
-**The Fix** (implemented in `CAVMAEDataModule`):
+**The Fix** (two-layer approach):
 
-1. Dataset creation moved to `LightningDataModule.setup()` which runs AFTER DDP initialization
-2. Each rank counts actual samples in its assigned shards
-3. Ranks synchronize via `dist.all_reduce(MIN)` to find the minimum sample count
-4. All ranks limit iteration to this minimum, ensuring equal batch counts
+1. **Rank-level sync** (`CAVMAEDataModule.setup()`):
+   - Counts samples per rank using shard metadata
+   - Syncs via `dist.all_reduce(MIN)` to find minimum batch count
+   - Sets `max_samples` on dataset and `limit_train_batches` on trainer
 
-**Key Code Changes**:
-- `src/dataloader_sharded.py`: Added `rank`, `world_size`, `max_samples` parameters
-- `train_unsupervised.py`: Added `CAVMAEDataModule` class that handles DDP sync
+2. **Worker-level sync** (`ShardedAudiosetDataset.__iter__()`):
+   - Uses standard IterableDataset + DDP pattern
+   - All workers iterate all shards for their rank
+   - Workers yield only samples where `sample_idx % num_workers == worker_id`
+   - All workers stop at the same `sample_idx` when `max_samples` is reached
 
-**Verification**: You should see these logs during training:
+**Key Code** (`src/dataloader_sharded.py:__iter__`):
+```python
+sample_idx = 0
+for shard_path in shards_for_rank:
+    for item in data_list:
+        if self.max_samples is not None and sample_idx >= self.max_samples:
+            return
+        if sample_idx % num_workers == worker_id:
+            yield self.flatten_dataset(item)
+        sample_idx += 1
 ```
-DataModule setup: rank=0, world_size=2
-Rank 0: counted 395000 samples in assigned shards
-Rank 0: synced epoch length to 390000 samples (was 395000)
+
+**Trade-off**: This pattern has higher I/O (each worker loads all shards) but guarantees synchronization.
+
+**Verification**: You should see these logs:
+```
+Rank 0: DDP sync -> 22046 batches/epoch (discarding 164 samples = 0.0%)
+Rank 0: set max_samples=396828
 ```
 
 ### Audio Length Mismatch Warning

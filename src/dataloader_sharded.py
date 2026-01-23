@@ -315,14 +315,26 @@ class ShardedAudiosetDataset(IterableDataset):
 
         return fbanks, images, data['video_id'], torch.tensor(frame_indices)
 
+
+    def _create_dummy_sample(self, video_id="dummy_error"):
+        """Create a zero-filled sample to replace corrupted data (maintains DDP sync)."""
+        num_frames = self.audio_conf.get('total_frame', 16)
+        target_length = self.target_length
+        im_res = self.im_res
+        
+        fbanks = torch.zeros(num_frames, target_length, self.num_mel_bins)
+        images = torch.zeros(num_frames, 3, im_res, im_res)
+        frame_indices = torch.arange(num_frames)
+        
+        return fbanks, images, video_id, frame_indices
+
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
 
-        # Use rank/world_size set in __init__
         rank = self._rank
         world_size = self._world_size
 
-        # Partition shards by rank
+        # Partition shards by rank (DDP)
         if world_size > 1:
             per_rank = int(math.ceil(len(self.shards) / float(world_size)))
             rank_start = rank * per_rank
@@ -332,26 +344,22 @@ class ShardedAudiosetDataset(IterableDataset):
         else:
             shards_for_rank = self.shards
 
-        # Partition shards by worker
+        # Worker info
         if worker_info is None:
-            shards_to_read = shards_for_rank
             num_workers = 1
             worker_id = 0
         else:
             num_workers = worker_info.num_workers
             worker_id = worker_info.id
-            per_worker = int(math.ceil(len(shards_for_rank) / float(num_workers)))
-            iter_start = worker_id * per_worker
-            iter_end = min(iter_start + per_worker, len(shards_for_rank))
-            shards_to_read = shards_for_rank[iter_start:iter_end]
-            logging.info(f"Worker {worker_id}/{num_workers}: assigned {len(shards_to_read)} shards")
 
         if self.shuffle_shards:
-            random.shuffle(shards_to_read)
+            random.shuffle(shards_for_rank)
 
-        # Note: Batch limiting is handled at Trainer level via limit_train_batches
-        # This provides proper DDP synchronization across all ranks
-        for shard_path in shards_to_read:
+        # Standard IterableDataset + DDP pattern:
+        # All workers iterate all shards, but only yield samples where sample_idx % num_workers == worker_id
+        # This ensures all workers stay synchronized and process equal amounts
+        sample_idx = 0
+        for shard_path in shards_for_rank:
             try:
                 data_list = torch.load(shard_path, weights_only=False, mmap=self.use_mmap)
             except Exception as e:
@@ -362,10 +370,19 @@ class ShardedAudiosetDataset(IterableDataset):
                 random.shuffle(data_list)
 
             for item in data_list:
-                try:
-                    yield self.flatten_dataset(item)
-                except Exception as e:
-                    video_id = item.get('video_id', 'unknown')
-                    logging.warning(f"Error processing sample {video_id} in {shard_path}: {e}")
-                    continue
+                # Check max_samples limit (for DDP sync)
+                if self.max_samples is not None and sample_idx >= self.max_samples:
+                    return
+
+                # Only yield samples belonging to this worker
+                if sample_idx % num_workers == worker_id:
+                    try:
+                        yield self.flatten_dataset(item)
+                    except Exception as e:
+                        video_id = item.get('video_id', 'unknown')
+                        error_msg = f"Error processing sample {video_id} in {shard_path}: {e}"
+                        logging.warning(f" [WARNING: DUMMY SAMPLE] {error_msg}. Yielding ZERO-FILLED dummy sample to maintain DDP synchronization!")
+                        yield self._create_dummy_sample(f"corrupt_{video_id}")
+
+                sample_idx += 1
 
