@@ -6,8 +6,8 @@
 #SBATCH --mem=64G
 #SBATCH --time=04:00:00
 #SBATCH --mail-type=END
-#SBATCH --output=/storage/slurm/schnackl/fakesync/slurm_logs_flo/slurm-cav-mae-sync-eval-sharded-%j.out
-#SBATCH --error=/storage/slurm/schnackl/fakesync/slurm_logs_flo/slurm-cav-mae-sync-eval-sharded-%j.err
+#SBATCH --output=/storage/slurm/hunecke/fakesync/slurm_logs/eval/slurm-cav-mae-sync-eval-sharded-%j.out
+#SBATCH --error=/storage/slurm/hunecke/fakesync/slurm_logs/eval/slurm-cav-mae-sync-eval-sharded-%j.err
 
 # 1. Force stdout/stderr to flush immediately
 export PYTHONUNBUFFERED=1
@@ -24,9 +24,9 @@ echo "GPU info:"
 nvidia-smi
 
 # 3. Paths
-PROJECT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync
+PROJECT_PATH=/storage/slurm/hunecke/fakesync/cav-mae-sync
 # Sharded eval dataset (preprocessed with create_sharded_dataset.py)
-SHARDED_EVAL_DIR=/storage/slurm/schnackl/fakesync/data/fakeavceleb/preprocessed/shards_eval
+SHARDED_EVAL_DIR=/storage/slurm/hunecke/fakesync/data/fakeavceleb/preprocessed/shards_eval
 
 CHECKPOINT_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded/best.ckpt
 OUTPUT_DIR=${PROJECT_PATH}/outputs/eval_sharded_$(date +%Y%m%d_%H%M%S)
