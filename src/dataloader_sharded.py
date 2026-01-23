@@ -282,6 +282,7 @@ class ShardedAudiosetDataset(IterableDataset):
             # Defensive shape validation to prevent torch.stack failures
             expected_shape = (target_length, self.num_mel_bins)
             if fbank.shape != expected_shape:
+                logging.warning(f"Shape mismatch in {data['video_id']}: got {fbank.shape}, expected {expected_shape}. Correcting.")
                 # Fix shape by padding/truncating
                 t, f = fbank.shape
                 if f != self.num_mel_bins:
