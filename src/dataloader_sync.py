@@ -16,6 +16,21 @@ import torchvision.transforms as T
 from PIL import Image
 import PIL
 
+# Configure torchaudio backend (newer versions default to torchcodec which may not be installed)
+# Try soundfile first, then sox_io as fallback
+try:
+    # For torchaudio >= 2.0
+    if hasattr(torchaudio, 'set_audio_backend'):
+        try:
+            torchaudio.set_audio_backend("soundfile")
+        except RuntimeError:
+            try:
+                torchaudio.set_audio_backend("sox_io")
+            except RuntimeError:
+                logging.warning("Could not set torchaudio backend, using default")
+except Exception as e:
+    logging.warning(f"Error configuring torchaudio backend: {e}")
+
 def make_index_dict(label_csv):
     index_lookup = {}
     with open(label_csv, 'r') as f:

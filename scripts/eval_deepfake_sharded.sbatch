@@ -18,7 +18,7 @@ echo "Date: $(date)"
 echo "============================================"
 
 # 2. Environment Setup
-source /storage/slurm/schnackl/fakesync/myVenv/.venv/bin/activate
+source /storage/slurm/hunecke/fakesync/.venv/bin/activate
 echo "Running python version $(python3 --version) from $(which python)"
 echo "GPU info:"
 nvidia-smi
