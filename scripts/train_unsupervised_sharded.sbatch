@@ -2,7 +2,7 @@
 #SBATCH --job-name="Train CAV-MAE-Sync Sharded"
 #SBATCH --nodes=1
 #SBATCH --cpus-per-gpu=5
-#SBATCH --gres=gpu:a40:2
+#SBATCH --gres=gpu:a40:4
 #SBATCH --mem=64G
 #SBATCH --time=72:00:00
 #SBATCH --mail-type=END
@@ -12,7 +12,7 @@
 # 1. Force stdout/stderr to flush immediately
 export PYTHONUNBUFFERED=1
 # DEBUG for profiling output
-export LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+export LOG_LEVEL=${LOG_LEVEL:-INFO}
 
 echo "================ DEBUG INFO ================"
 echo "Hostname: $(hostname)"
@@ -26,6 +26,7 @@ echo "GPU info:"
 nvidia-smi
 
 # 3. Paths
+RESUME_CHECKPOINT_PATH=/storage/slurm/hunecke/fakesync/cav-mae-sync/outputs/checkpoints/unsupervised_voxceleb2_1epoch_1worker/last.ckpt
 PROJECT_PATH=/storage/slurm/hunecke/fakesync/cav-mae-sync
 SHARDED_DATASET_DIR=/storage/slurm/hunecke/fakesync/data/voxceleb2/preprocessed/shards_train
 SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_$(date +%Y%m%d_%H%M%S)
@@ -64,7 +65,7 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --warmup_epochs ${WARMUP_EPOCHS} \
     --lr ${LR} \
     --save_path ${SAVE_PATH} \
-    --resume /storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_mae_sync.pth \
+    --resume ${RESUME_CHECKPOINT_PATH} \
     --contrast_bidirect \
     --contrast_loss_weight 0.5 \
     --contrast_inter_weight 0.3 \
