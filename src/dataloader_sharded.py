@@ -352,23 +352,37 @@ class ShardedAudiosetDataset(IterableDataset):
             num_workers = worker_info.num_workers
             worker_id = worker_info.id
 
-        if self.shuffle_shards:
-            random.shuffle(shards_for_rank)
+        # PARTITIONED LOADING: Each worker gets a subset of this rank's shards
+        # This prevents I/O contention where all workers fight for the same files
+        per_worker = len(shards_for_rank) // num_workers
+        worker_start = worker_id * per_worker
+        if worker_id == num_workers - 1:
+            # Last worker gets remaining shards
+            worker_end = len(shards_for_rank)
+        else:
+            worker_end = worker_start + per_worker
+        
+        shards_for_worker = shards_for_rank[worker_start:worker_end]
+        logging.info(f"[Worker {worker_id}/{num_workers}] Assigned shards [{worker_start}:{worker_end}] ({len(shards_for_worker)} of {len(shards_for_rank)} rank shards)")
 
-        # Standard IterableDataset + DDP pattern:
-        # All workers iterate all shards, but only yield samples where sample_idx % num_workers == worker_id
-        # This ensures all workers stay synchronized and process equal amounts
+        if self.shuffle_shards:
+            random.shuffle(shards_for_worker)
+
+        # Each worker yields ALL samples from its assigned shards - no interleaving
         sample_idx = 0
-        for shard_path in shards_for_rank:
+        for shard_idx, shard_path in enumerate(shards_for_worker):
+            load_start = time.time()
+            print(f"[Worker {worker_id}] Loading shard {shard_idx+1}/{len(shards_for_worker)}: {os.path.basename(shard_path)}", flush=True)
+            
             try:
-                import time
-                start_t = time.time()
-                logging.info(f"[Worker {worker_id}] Starting load: {shard_path} (mmap={self.use_mmap})")
-                
                 data_list = torch.load(shard_path, weights_only=False, mmap=self.use_mmap)
+                load_duration = time.time() - load_start
+                print(f"[Worker {worker_id}] Loaded {os.path.basename(shard_path)} in {load_duration:.2f}s ({len(data_list)} items)", flush=True)
                 
-                dur = time.time() - start_t
-                logging.info(f"[Worker {worker_id}]  Loaded {shard_path} in {dur:.2f}s. Items: {len(data_list)}")
+                # Warn if load took too long (potential NFS issue)
+                if load_duration > 30:
+                    logging.warning(f"[Worker {worker_id}] SLOW SHARD LOAD: {shard_path} took {load_duration:.1f}s (>30s)")
+                    
             except Exception as e:
                 logging.warning(f"Error loading shard {shard_path}: {e}")
                 continue
@@ -381,17 +395,13 @@ class ShardedAudiosetDataset(IterableDataset):
                 if self.max_samples is not None and sample_idx >= self.max_samples:
                     return
 
-                # Only yield samples belonging to this worker
-                if sample_idx % num_workers == worker_id:
-                    try:
-                        yield self.flatten_dataset(item)
-                        if sample_idx % 100 == 0:
-                            logging.info(f"[Worker {worker_id}] Yielded sample {sample_idx} from {shard_path}")
-                    except Exception as e:
-                        video_id = item.get('video_id', 'unknown')
-                        error_msg = f"Error processing sample {video_id} in {shard_path}: {e}"
-                        logging.warning(f" [WARNING: DUMMY SAMPLE] {error_msg}. Yielding ZERO-FILLED dummy sample to maintain DDP synchronization!")
-                        yield self._create_dummy_sample(f"corrupt_{video_id}")
+                try:
+                    yield self.flatten_dataset(item)
+                except Exception as e:
+                    video_id = item.get('video_id', 'unknown')
+                    error_msg = f"Error processing sample {video_id} in {shard_path}: {e}"
+                    logging.warning(f" [WARNING: DUMMY SAMPLE] {error_msg}. Yielding ZERO-FILLED dummy sample to maintain DDP synchronization!")
+                    yield self._create_dummy_sample(f"corrupt_{video_id}")
 
                 sample_idx += 1
 

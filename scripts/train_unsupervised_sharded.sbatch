@@ -73,7 +73,8 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --log_freq 4 \
     --cls_token \
     --num_register_tokens 8 \
-    --gradient_accumulation_steps ${ACCUMULATION_STEPS}
+    --gradient_accumulation_steps ${ACCUMULATION_STEPS} \
+    --num_workers 1
     # Optional flags:
     # --dataset_fraction 0.01
     # --fast_dev_run
