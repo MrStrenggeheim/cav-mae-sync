@@ -16,20 +16,41 @@ import torchvision.transforms as T
 from PIL import Image
 import PIL
 
-# Configure torchaudio backend (newer versions default to torchcodec which may not be installed)
-# Try soundfile first, then sox_io as fallback
-try:
-    # For torchaudio >= 2.0
-    if hasattr(torchaudio, 'set_audio_backend'):
-        try:
-            torchaudio.set_audio_backend("soundfile")
-        except RuntimeError:
-            try:
-                torchaudio.set_audio_backend("sox_io")
-            except RuntimeError:
-                logging.warning("Could not set torchaudio backend, using default")
-except Exception as e:
-    logging.warning(f"Error configuring torchaudio backend: {e}")
+# Provide fallback audio loading when torchaudio.load fails
+# (newer torchaudio 2.5+ defaults to torchcodec which may not be installed)
+import subprocess
+
+
+def load_audio(filename):
+    """
+    Load audio file with ffmpeg fallback for robustness.
+    Matches the approach used in create_sharded_dataset.py.
+    
+    Returns:
+        waveform: torch.Tensor of shape (1, num_samples)
+        sample_rate: int
+    """
+    # Try torchaudio first
+    try:
+        waveform, sr = torchaudio.load(filename)
+        return waveform, sr
+    except Exception as e:
+        logging.debug(f"torchaudio.load failed for {filename}: {e}, falling back to ffmpeg CLI")
+    
+    # Fallback to ffmpeg CLI (same as create_sharded_dataset.py)
+    try:
+        command = [
+            'ffmpeg', '-v', 'quiet', '-i', filename, 
+            '-f', 's16le', '-ar', '16000', '-ac', '1', 
+            '-af', 'pan=mono|c0=c0', '-'
+        ]
+        pipe = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        raw_audio = np.frombuffer(pipe.stdout, dtype=np.int16)
+        waveform = torch.from_numpy(raw_audio).float().unsqueeze(0) / 32768.0
+        sr = 16000
+        return waveform, sr
+    except Exception as e2:
+        raise RuntimeError(f"Both torchaudio and ffmpeg failed for {filename}: {e2}")
 
 def make_index_dict(label_csv):
     index_lookup = {}
@@ -201,12 +222,12 @@ class AudiosetDataset(Dataset):
     def _wav2fbank(self, filename, filename2=None, mix_lambda=-1):
         # no mixup
         if filename2 == None:
-            waveform, sr = torchaudio.load(filename)
+            waveform, sr = load_audio(filename)
             waveform = waveform - waveform.mean()
         # mixup
         else:
-            waveform1, sr = torchaudio.load(filename)
-            waveform2, _ = torchaudio.load(filename2)
+            waveform1, sr = load_audio(filename)
+            waveform2, _ = load_audio(filename2)
 
             waveform1 = waveform1 - waveform1.mean()
             waveform2 = waveform2 - waveform2.mean()
