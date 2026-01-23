@@ -1,6 +1,7 @@
 import argparse
 import os
 import logging
+import time
 import torch
 import torch.optim as optim
 import pytorch_lightning as pl
@@ -65,6 +66,8 @@ class CAVMAEModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         import time
         
+        logging.info(f"[Rank {self.global_rank}] Batch {batch_idx}: Training Step Start")
+        
         # DDP sync: Stop early if we've reached max batches for this epoch
         # This ensures all ranks process the same number of batches
         # Note: We set should_stop at the END of this step, not before processing,
@@ -76,9 +79,11 @@ class CAVMAEModule(pl.LightningModule):
         
         fbanks, images, video_ids, frame_indices = batch
         
+        logging.info(f"[Rank {self.global_rank}] Batch {batch_idx}: Forward Start")
         forward_start = time.perf_counter()
         outputs = self(fbanks, images)
         forward_time = time.perf_counter() - forward_start
+        logging.info(f"[Rank {self.global_rank}] Batch {batch_idx}: Forward End ({forward_time:.3f}s)")
         self._profile_forward_time += forward_time
         self._profile_step_count += 1
         
@@ -186,16 +191,51 @@ class CAVMAEModule(pl.LightningModule):
             self.trainer.should_stop = True
             logging.info(f"Reached max_batches_per_epoch ({self.max_batches_per_epoch}), stopping epoch")
         
+        logging.info(f"[Rank {self.global_rank}] Batch {batch_idx}: Returning Loss")
         return loss
+
+    def on_train_batch_start(self, batch, batch_idx):
+        import time
+        logging.info(f"[Rank {self.global_rank}] Starting Batch {batch_idx}")
+        if self._batch_start_time is not None:
+            self._profile_data_time += time.perf_counter() - self._batch_start_time
+        self._batch_start_time = time.perf_counter()
 
     def on_train_batch_end(self, outputs, batch, batch_idx):
         import time
         self._batch_start_time = time.perf_counter()
+        logging.info(f"[Rank {self.global_rank}] Finished Batch {batch_idx}")
+
+    def on_before_zero_grad(self, optimizer):
+         logging.info(f"[Rank {self.global_rank}] Optimizer Step (Zero Grad) - Start")
+
+    def on_before_backward(self, loss):
+        logging.info(f"[Rank {self.global_rank}] Backward Pass - Start (DDP Sync happens here)")
+        
+    def on_after_backward(self):
+        logging.info(f"[Rank {self.global_rank}] Backward Pass - End")
+        
+    def on_before_optimizer_step(self, optimizer):
+        logging.info(f"[Rank {self.global_rank}] Optimizer Step - Start")
+
+    def validation_step(self, batch, batch_idx):
+        # Alias for test_step
+        return self.test_step(batch, batch_idx)
+
+    def on_train_epoch_end(self):
+        logging.info(f"[Rank {self.global_rank}] Epoch End - Start (Checkpointing/Sync happens here)")
+
+    def on_save_checkpoint(self, checkpoint):
+        logging.info(f"[Rank {self.global_rank}] Saving Checkpoint - Start")
 
     def test_step(self, batch, batch_idx):
+        logging.info(f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: Start")
         fbanks, images, video_ids, frame_indices = batch
         
+        t0 = time.time()
         outputs = self(fbanks, images)
+        t1 = time.time()
+        logging.info(f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: Forward done ({t1-t0:.3f}s)")
         
         # Unpack outputs from dictionary
         loss = outputs['loss']
@@ -211,6 +251,7 @@ class CAVMAEModule(pl.LightningModule):
         self.log('test/acc/intra', intra_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log('test/acc/inter', inter_acc, on_step=True, on_epoch=True, prog_bar=True, logger=True)
         
+        logging.info(f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: End")
         return loss
 
     def configure_optimizers(self):
@@ -444,6 +485,15 @@ def get_args():
     return parser.parse_args()
 
 def main():
+    # Configure logging
+    log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    logging.basicConfig(level=log_level, format='%(asctime)s [%(levelname)s] %(message)s', force=True)
+    
+    # Suppress verbose third-party logs
+    logging.getLogger("torch").setLevel(logging.WARNING)
+    logging.getLogger("PIL").setLevel(logging.WARNING)
+    logging.getLogger("matplotlib").setLevel(logging.WARNING)
+    
     # Set float32 matmul precision to 'high'/'medium' (instead of 'highest') to utilize Tensor Cores if available
     torch.set_float32_matmul_precision('medium')
     

@@ -361,7 +361,14 @@ class ShardedAudiosetDataset(IterableDataset):
         sample_idx = 0
         for shard_path in shards_for_rank:
             try:
+                import time
+                start_t = time.time()
+                logging.info(f"[Worker {worker_id}] Starting load: {shard_path} (mmap={self.use_mmap})")
+                
                 data_list = torch.load(shard_path, weights_only=False, mmap=self.use_mmap)
+                
+                dur = time.time() - start_t
+                logging.info(f"[Worker {worker_id}]  Loaded {shard_path} in {dur:.2f}s. Items: {len(data_list)}")
             except Exception as e:
                 logging.warning(f"Error loading shard {shard_path}: {e}")
                 continue
@@ -378,6 +385,8 @@ class ShardedAudiosetDataset(IterableDataset):
                 if sample_idx % num_workers == worker_id:
                     try:
                         yield self.flatten_dataset(item)
+                        if sample_idx % 100 == 0:
+                            logging.info(f"[Worker {worker_id}] Yielded sample {sample_idx} from {shard_path}")
                     except Exception as e:
                         video_id = item.get('video_id', 'unknown')
                         error_msg = f"Error processing sample {video_id} in {shard_path}: {e}"
