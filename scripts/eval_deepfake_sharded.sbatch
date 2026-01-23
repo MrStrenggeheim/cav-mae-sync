@@ -29,7 +29,7 @@ PROJECT_PATH=/storage/slurm/hunecke/fakesync/cav-mae-sync
 SHARDED_EVAL_DIR=/storage/slurm/hunecke/fakesync/data/fakeavceleb/preprocessed/shards_eval
 
 CHECKPOINT_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded/best.ckpt
-OUTPUT_DIR=${PROJECT_PATH}/outputs/eval_sharded_$(date +%Y%m%d_%H%M%S)
+OUTPUT_DIR=${PROJECT_PATH}/outputs/eval_extended_$(date +%Y%m%d_%H%M%S)
 OUTPUT_CSV=${OUTPUT_DIR}/eval_results.csv
 
 # 4. Evaluation Configuration

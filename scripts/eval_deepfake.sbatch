@@ -64,6 +64,7 @@ python3 ${PROJECT_PATH}/eval_deepfake.py \
     --total_frame ${TOTAL_FRAME} \
     --num_workers 4 \
     --mean ${MEAN} \
-    --std ${STD}
+    --std ${STD} \
+    --no_masking
 
 echo "Evaluation finished at $(date) with exit code $?"

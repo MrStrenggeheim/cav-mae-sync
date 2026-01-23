@@ -51,6 +51,12 @@ class SyncScoreResult:
     loss_c: float = 0.0
     intra_acc: float = 0.0
     inter_acc: float = 0.0
+    
+    # Extended metrics
+    intra_sim_audio: float = 0.0   # Audio temporal coherence
+    intra_sim_visual: float = 0.0  # Visual temporal coherence
+    sync_euc: float = 0.0          # Euclidean distance
+    sync_pearson: float = 0.0      # Pearson correlation
 
 
 def compute_sync_scores(
@@ -102,6 +108,41 @@ def compute_sync_scores(
     aggregated['sync_p10'] = torch.tensor(np.percentile(sims_np, 10, axis=1), device=per_frame_sims.device)
     aggregated['sync_p25'] = torch.tensor(np.percentile(sims_np, 25, axis=1), device=per_frame_sims.device)
     aggregated['sync_p50'] = torch.tensor(np.percentile(sims_np, 50, axis=1), device=per_frame_sims.device)
+    
+    # --- New Metrics ---
+    # Reshape embeddings to (batch_size, total_frames, embed_dim)
+    cls_a_batches = cls_a_norm.view(batch_size, total_frames, -1)
+    cls_v_batches = cls_v_norm.view(batch_size, total_frames, -1)
+    
+    # 1. Intra-Modality Similarity (Temporal Coherence)
+    # Compute mean cosine sim of all frame pairs within the same video
+    # (b, t, d) @ (b, d, t) -> (b, t, t)
+    sim_aa = torch.bmm(cls_a_batches, cls_a_batches.transpose(1, 2))
+    sim_vv = torch.bmm(cls_v_batches, cls_v_batches.transpose(1, 2))
+    
+    # Exclude diagonal (self-similarity is always 1)
+    mask = ~torch.eye(total_frames, device=cls_a.device, dtype=torch.bool)
+    aggregated['intra_sim_audio'] = (sim_aa * mask).sum(dim=(1, 2)) / (total_frames * (total_frames - 1))
+    aggregated['intra_sim_visual'] = (sim_vv * mask).sum(dim=(1, 2)) / (total_frames * (total_frames - 1))
+
+    # 2. Euclidean Distance (on normalized embeddings)
+    # ||u - v||^2 = ||u||^2 + ||v||^2 - 2u.v = 2 - 2cos(u,v) for normalized vectors
+    # But let's compute directly for safety
+    dist = torch.norm(cls_a_norm - cls_v_norm, dim=-1).view(batch_size, total_frames)
+    aggregated['sync_euc'] = dist.mean(dim=1)
+
+    # 3. Pearson Correlation (between feature vectors, averaged over frames)
+    # Pearson = cov(a, v) / (std(a)*std(v))
+    # Note: cls_a_norm is L2 normalized, NOT centered/std-normalized.
+    # We need to center and normalize by std dev for Pearson.
+    
+    # Center vectors
+    cls_a_centered = cls_a - cls_a.mean(dim=-1, keepdim=True)
+    cls_v_centered = cls_v - cls_v.mean(dim=-1, keepdim=True)
+    
+    # Pearson calculation
+    pearson = F.cosine_similarity(cls_a_centered, cls_v_centered, dim=-1)
+    aggregated['sync_pearson'] = pearson.view(batch_size, total_frames).mean(dim=1)
     
     return per_frame_sims, aggregated
 
@@ -222,6 +263,11 @@ class DeepFakeEvaluator(pl.LightningModule):
                 loss_c=outputs['loss_c'].item(),
                 intra_acc=outputs['c_acc'].item(),
                 inter_acc=outputs['inter_acc'].item(),
+                # Extended metrics
+                intra_sim_audio=aggregated['intra_sim_audio'][i].item(),
+                intra_sim_visual=aggregated['intra_sim_visual'][i].item(),
+                sync_euc=aggregated['sync_euc'][i].item(),
+                sync_pearson=aggregated['sync_pearson'][i].item(),
             )
             self.test_outputs.append(result)
         
@@ -270,6 +316,10 @@ class DeepFakeEvaluator(pl.LightningModule):
             'sync_p10': [],
             'sync_p25': [],
             'sync_std': [],
+            'sync_pearson': [],
+            'sync_euc': [],
+            'intra_sim_audio': [],
+            'intra_sim_visual': [],
         }
         
         for result in self.test_outputs:
@@ -282,8 +332,13 @@ class DeepFakeEvaluator(pl.LightningModule):
                 scores_by_metric['sync_min'].append(-result.sync_min)
                 scores_by_metric['sync_p10'].append(-result.sync_p10)
                 scores_by_metric['sync_p25'].append(-result.sync_p25)
-                # For variance, higher = more likely fake
+                scores_by_metric['sync_pearson'].append(-result.sync_pearson)
+                # For distance/variance, higher = more likely fake
+                scores_by_metric['sync_euc'].append(result.sync_euc)
                 scores_by_metric['sync_std'].append(result.sync_std)
+                # Intra-sim: Lower coherence = more likely fake? (we'll check AUC)
+                scores_by_metric['intra_sim_audio'].append(-result.intra_sim_audio)
+                scores_by_metric['intra_sim_visual'].append(-result.intra_sim_visual)
         
         if len(labels) < 2:
             logging.warning(f"Only {len(labels)} labels matched. Cannot compute detection metrics.")
@@ -434,6 +489,10 @@ def results_to_dataframe(results: List[SyncScoreResult]) -> pd.DataFrame:
             'loss_c': r.loss_c,
             'intra_acc': r.intra_acc,
             'inter_acc': r.inter_acc,
+            'intra_sim_audio': r.intra_sim_audio,
+            'intra_sim_visual': r.intra_sim_visual,
+            'sync_euc': r.sync_euc,
+            'sync_pearson': r.sync_pearson,
         }
         # Also store per-frame similarities as a JSON-serializable list
         row['per_frame_sims'] = r.per_frame_similarities.tolist()
