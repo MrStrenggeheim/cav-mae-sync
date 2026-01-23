@@ -348,7 +348,8 @@ class CAVMAEDataModule(pl.LightningDataModule):
                 pin_memory=True,
                 drop_last=True,
                 persistent_workers=True if self.args.num_workers > 0 else False,
-                prefetch_factor=4 if self.args.num_workers > 0 else None
+                prefetch_factor=4 if self.args.num_workers > 0 else None,
+                timeout=120 if self.args.num_workers > 0 else 0,  # 2 minute timeout for workers
             )
         else:
             return DataLoader(
