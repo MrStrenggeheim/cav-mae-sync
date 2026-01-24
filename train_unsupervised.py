@@ -966,10 +966,6 @@ def main():
                     if hasattr(pl_module, "max_batches_per_epoch"):
                         pl_module.max_batches_per_epoch = min_batches
 
-                    # Update num_training_batches so the progress bar shows the correct total
-                    # This is what Lightning uses for the tqdm total
-                    trainer.num_training_batches = min_batches
-
                     logging.info(
                         f"DDPBatchSyncCallback: Synced to {min_batches} batches/epoch (progress bar will show total)"
                     )
@@ -981,6 +977,26 @@ def main():
                             f"Rank {info['rank']}: Using {info['used_samples']} samples, "
                             f"discarding {info['discarded']} ({info['discard_pct']:.1f}%)"
                         )
+
+        def on_train_epoch_start(self, trainer, pl_module):
+            """Manually update the progress bar total since num_training_batches is read-only."""
+            if hasattr(trainer.datamodule, "min_batches_per_epoch"):
+                min_batches = trainer.datamodule.min_batches_per_epoch
+                if min_batches is not None:
+                    # Try to access the progress bar directly
+                    # Standard TQDMProgressBar (PL default) stores the actual tqdm instance in .main_progress_bar
+                    if trainer.progress_bar_callback:
+                        pbar = getattr(
+                            trainer.progress_bar_callback, "main_progress_bar", None
+                        )
+                        if pbar is not None:
+                            pbar.total = min_batches
+                            pbar.refresh()
+
+                        trainer.progress_bar_callback.main_progress_bar.total = (
+                            min_batches
+                        )
+                        trainer.progress_bar_callback.main_progress_bar.refresh()
 
     # Add to callbacks
     ddp_sync_callback = DDPBatchSyncCallback()
