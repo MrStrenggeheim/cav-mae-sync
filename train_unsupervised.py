@@ -71,9 +71,8 @@ class CAVMAEModule(pl.LightningModule):
         import sys
         import time
 
-        print(
-            f"[Rank {self.global_rank}] Batch {batch_idx}: Training Step Start",
-            flush=True,
+        logging.debug(
+            f"[Rank {self.global_rank}] Batch {batch_idx}: Training Step Start"
         )
 
         # Note: DDP sync is handled by setting trainer.limit_train_batches in DDPBatchSyncCallback.
@@ -82,13 +81,12 @@ class CAVMAEModule(pl.LightningModule):
 
         fbanks, images, video_ids, frame_indices = batch
 
-        print(f"[Rank {self.global_rank}] Batch {batch_idx}: Forward Start", flush=True)
+        logging.debug(f"[Rank {self.global_rank}] Batch {batch_idx}: Forward Start")
         forward_start = time.perf_counter()
         outputs = self(fbanks, images)
         forward_time = time.perf_counter() - forward_start
-        print(
-            f"[Rank {self.global_rank}] Batch {batch_idx}: Forward End ({forward_time:.3f}s)",
-            flush=True,
+        logging.debug(
+            f"[Rank {self.global_rank}] Batch {batch_idx}: Forward End ({forward_time:.3f}s)"
         )
         self._profile_forward_time += forward_time
         self._profile_step_count += 1
@@ -364,15 +362,15 @@ class CAVMAEModule(pl.LightningModule):
             self._profile_forward_time = 0.0
             self._profile_step_count = 0
 
-        print(
-            f"[Rank {self.global_rank}] Batch {batch_idx}: Returning Loss", flush=True
+        logging.debug(
+            f"[Rank {self.global_rank}] Batch {batch_idx}: Returning Loss"
         )
         return loss
 
     def on_train_batch_start(self, batch, batch_idx):
         import time
 
-        print(f"[Rank {self.global_rank}] Starting Batch {batch_idx}", flush=True)
+        logging.debug(f"[Rank {self.global_rank}] Starting Batch {batch_idx}")
         if self._batch_start_time is not None:
             self._profile_data_time += time.perf_counter() - self._batch_start_time
         self._batch_start_time = time.perf_counter()
@@ -381,50 +379,47 @@ class CAVMAEModule(pl.LightningModule):
         import time
 
         self._batch_start_time = time.perf_counter()
-        print(f"[Rank {self.global_rank}] Finished Batch {batch_idx}", flush=True)
+        logging.debug(f"[Rank {self.global_rank}] Finished Batch {batch_idx}")
 
     def on_before_zero_grad(self, optimizer):
-        print(
-            f"[Rank {self.global_rank}] Optimizer Step (Zero Grad) - Start", flush=True
+        logging.debug(
+            f"[Rank {self.global_rank}] Optimizer Step (Zero Grad) - Start"
         )
 
     def on_before_backward(self, loss):
-        print(
-            f"[Rank {self.global_rank}] Backward Pass - Start (DDP Sync happens here)",
-            flush=True,
+        logging.debug(
+            f"[Rank {self.global_rank}] Backward Pass - Start (DDP Sync happens here)"
         )
 
     def on_after_backward(self):
-        print(f"[Rank {self.global_rank}] Backward Pass - End", flush=True)
+        logging.debug(f"[Rank {self.global_rank}] Backward Pass - End")
 
     def on_before_optimizer_step(self, optimizer):
-        print(f"[Rank {self.global_rank}] Optimizer Step - Start", flush=True)
+        logging.debug(f"[Rank {self.global_rank}] Optimizer Step - Start")
 
     def validation_step(self, batch, batch_idx):
         # Alias for test_step
         return self.test_step(batch, batch_idx)
 
     def on_train_epoch_end(self):
-        print(
-            f"[Rank {self.global_rank}] Epoch End - Start (Checkpointing/Sync happens here)",
-            flush=True,
+        logging.debug(
+            f"[Rank {self.global_rank}] Epoch End - Start (Checkpointing/Sync happens here)"
         )
 
     def on_save_checkpoint(self, checkpoint):
-        print(f"[Rank {self.global_rank}] Saving Checkpoint - Start", flush=True)
+        logging.debug(f"[Rank {self.global_rank}] Saving Checkpoint - Start")
 
     def test_step(self, batch, batch_idx):
-        print(
-            f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: Start", flush=True
+        logging.debug(
+            f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: Start"
         )
         fbanks, images, video_ids, frame_indices = batch
 
         t0 = time.time()
         outputs = self(fbanks, images)
         t1 = time.time()
-        print(
-            f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: Forward done ({t1-t0:.3f}s)",
-            flush=True,
+        logging.debug(
+            f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: Forward done ({t1-t0:.3f}s)"
         )
 
         # Unpack outputs from dictionary
@@ -462,7 +457,7 @@ class CAVMAEModule(pl.LightningModule):
             logger=True,
         )
 
-        print(f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: End", flush=True)
+        logging.debug(f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: End")
         return loss
 
     def configure_optimizers(self):

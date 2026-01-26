@@ -364,7 +364,7 @@ class ShardedAudiosetDataset(IterableDataset):
             worker_end = worker_start + per_worker
         
         shards_for_worker = shards_for_rank[worker_start:worker_end]
-        logging.info(f"[Worker {worker_id}/{num_workers}] Assigned shards [{worker_start}:{worker_end}] ({len(shards_for_worker)} of {len(shards_for_rank)} rank shards)")
+        logging.info(f"[Rank {rank}, Worker {worker_id}/{num_workers}] Assigned shards [{worker_start}:{worker_end}] ({len(shards_for_worker)} of {len(shards_for_rank)} rank shards)")
 
         if self.shuffle_shards:
             random.shuffle(shards_for_worker)
@@ -373,16 +373,16 @@ class ShardedAudiosetDataset(IterableDataset):
         sample_idx = 0
         for shard_idx, shard_path in enumerate(shards_for_worker):
             load_start = time.time()
-            print(f"[Worker {worker_id}] Loading shard {shard_idx+1}/{len(shards_for_worker)}: {os.path.basename(shard_path)}", flush=True)
+            logging.debug(f"[Rank {rank}, Worker {worker_id}] Loading shard {shard_idx+1}/{len(shards_for_worker)}: {os.path.basename(shard_path)}")
             
             try:
                 data_list = torch.load(shard_path, weights_only=False, mmap=self.use_mmap)
                 load_duration = time.time() - load_start
-                print(f"[Worker {worker_id}] Loaded {os.path.basename(shard_path)} in {load_duration:.2f}s ({len(data_list)} items)", flush=True)
+                logging.debug(f"[Rank {rank}, Worker {worker_id}] Loaded {os.path.basename(shard_path)} in {load_duration:.2f}s ({len(data_list)} items)")
                 
                 # Warn if load took too long (potential NFS issue)
                 if load_duration > 30:
-                    logging.warning(f"[Worker {worker_id}] SLOW SHARD LOAD: {shard_path} took {load_duration:.1f}s (>30s)")
+                    logging.warning(f"[Rank {rank}, Worker {worker_id}] SLOW SHARD LOAD: {shard_path} took {load_duration:.1f}s (>30s)")
                     
             except Exception as e:
                 logging.warning(f"Error loading shard {shard_path}: {e}")
