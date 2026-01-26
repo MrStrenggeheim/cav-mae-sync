@@ -7,7 +7,11 @@ from datetime import timedelta
 import pytorch_lightning as pl
 import torch
 import torch.optim as optim
-from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+    TQDMProgressBar,
+)
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
@@ -362,9 +366,7 @@ class CAVMAEModule(pl.LightningModule):
             self._profile_forward_time = 0.0
             self._profile_step_count = 0
 
-        logging.debug(
-            f"[Rank {self.global_rank}] Batch {batch_idx}: Returning Loss"
-        )
+        logging.debug(f"[Rank {self.global_rank}] Batch {batch_idx}: Returning Loss")
         return loss
 
     def on_train_batch_start(self, batch, batch_idx):
@@ -382,9 +384,7 @@ class CAVMAEModule(pl.LightningModule):
         logging.debug(f"[Rank {self.global_rank}] Finished Batch {batch_idx}")
 
     def on_before_zero_grad(self, optimizer):
-        logging.debug(
-            f"[Rank {self.global_rank}] Optimizer Step (Zero Grad) - Start"
-        )
+        logging.debug(f"[Rank {self.global_rank}] Optimizer Step (Zero Grad) - Start")
 
     def on_before_backward(self, loss):
         logging.debug(
@@ -410,9 +410,7 @@ class CAVMAEModule(pl.LightningModule):
         logging.debug(f"[Rank {self.global_rank}] Saving Checkpoint - Start")
 
     def test_step(self, batch, batch_idx):
-        logging.debug(
-            f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: Start"
-        )
+        logging.debug(f"[Rank {self.global_rank}] Test/Val Batch {batch_idx}: Start")
         fbanks, images, video_ids, frame_indices = batch
 
         t0 = time.time()
@@ -940,13 +938,22 @@ def main():
     #
     # SOLUTION: Use a Callback to update trainer.limit_train_batches after setup() runs.
 
+    class FixedTQDMProgressBar(TQDMProgressBar):
+        def init_train_tqdm(self):
+            bar = super().init_train_tqdm()
+            # Fix for IterableDataset with DDP sync where we know the exact size
+            if (
+                hasattr(self.trainer.datamodule, "min_batches_per_epoch")
+                and self.trainer.datamodule.min_batches_per_epoch is not None
+            ):
+                bar.total = self.trainer.datamodule.min_batches_per_epoch
+            return bar
+
     class DDPBatchSyncCallback(pl.Callback):
         """Callback to sync batch counts across DDP ranks after datamodule setup.
 
         Sets trainer.limit_train_batches to ensure all ranks process the same number
         of batches per epoch, preventing NCCL deadlocks with IterableDataset.
-
-        Also updates the progress bar total so tqdm displays properly.
         """
 
         def on_train_start(self, trainer, pl_module):
@@ -973,34 +980,9 @@ def main():
                             f"discarding {info['discarded']} ({info['discard_pct']:.1f}%)"
                         )
 
-        def on_train_epoch_start(self, trainer, pl_module):
-            """Manually update the progress bar total since num_training_batches is read-only."""
-            if hasattr(trainer.datamodule, "min_batches_per_epoch"):
-                min_batches = trainer.datamodule.min_batches_per_epoch
-                if min_batches is not None:
-                    # Update the progress bar total for proper display
-                    # In newer PyTorch Lightning versions, the attribute is 'train_progress_bar'
-                    # In older versions, it was 'main_progress_bar'
-                    if trainer.progress_bar_callback:
-                        # Try train_progress_bar first (newer PL), then main_progress_bar (older PL)
-                        pbar = getattr(
-                            trainer.progress_bar_callback, "train_progress_bar", None
-                        )
-                        if pbar is None:
-                            pbar = getattr(
-                                trainer.progress_bar_callback, "main_progress_bar", None
-                            )
-                        
-                        if pbar is not None:
-                            # Update total and add epoch info to description
-                            pbar.total = min_batches
-                            current_epoch = trainer.current_epoch
-                            max_epochs = trainer.max_epochs
-                            pbar.set_description(f"Epoch {current_epoch + 1}/{max_epochs}")
-                            pbar.refresh()
-
     # Add to callbacks
     ddp_sync_callback = DDPBatchSyncCallback()
+    pbar_callback = FixedTQDMProgressBar(refresh_rate=args.log_freq)
 
     trainer = pl.Trainer(
         max_epochs=args.epochs,
@@ -1013,6 +995,7 @@ def main():
             time_checkpoint_callback,
             lr_monitor,
             ddp_sync_callback,
+            pbar_callback,
         ],
         logger=tb_logger,
         log_every_n_steps=args.log_freq,
