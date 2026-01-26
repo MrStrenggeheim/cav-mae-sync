@@ -983,20 +983,26 @@ def main():
             if hasattr(trainer.datamodule, "min_batches_per_epoch"):
                 min_batches = trainer.datamodule.min_batches_per_epoch
                 if min_batches is not None:
-                    # Try to access the progress bar directly
-                    # Standard TQDMProgressBar (PL default) stores the actual tqdm instance in .main_progress_bar
+                    # Update the progress bar total for proper display
+                    # In newer PyTorch Lightning versions, the attribute is 'train_progress_bar'
+                    # In older versions, it was 'main_progress_bar'
                     if trainer.progress_bar_callback:
+                        # Try train_progress_bar first (newer PL), then main_progress_bar (older PL)
                         pbar = getattr(
-                            trainer.progress_bar_callback, "main_progress_bar", None
+                            trainer.progress_bar_callback, "train_progress_bar", None
                         )
+                        if pbar is None:
+                            pbar = getattr(
+                                trainer.progress_bar_callback, "main_progress_bar", None
+                            )
+                        
                         if pbar is not None:
+                            # Update total and add epoch info to description
                             pbar.total = min_batches
+                            current_epoch = trainer.current_epoch
+                            max_epochs = trainer.max_epochs
+                            pbar.set_description(f"Epoch {current_epoch + 1}/{max_epochs}")
                             pbar.refresh()
-
-                        trainer.progress_bar_callback.main_progress_bar.total = (
-                            min_batches
-                        )
-                        trainer.progress_bar_callback.main_progress_bar.refresh()
 
     # Add to callbacks
     ddp_sync_callback = DDPBatchSyncCallback()
