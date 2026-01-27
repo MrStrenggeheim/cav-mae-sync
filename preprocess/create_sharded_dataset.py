@@ -113,7 +113,7 @@ def process_single_video(args):
             '-af', 'pan=mono|c0=c0', '-'
         ]
         pipe = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        raw_audio = np.frombuffer(pipe.stdout, dtype=np.int16)
+        raw_audio = np.frombuffer(pipe.stdout, dtype=np.int16).copy()
         waveform = torch.from_numpy(raw_audio).float().unsqueeze(0) / 32768.0
         sr = 16000
             

@@ -2,7 +2,7 @@
 #SBATCH --job-name="Preprocess CAV-MAE Shards"
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:0
 #SBATCH --mem=128G
 #SBATCH --time=24:00:00
@@ -31,7 +31,7 @@ OUTPUT_DIR=/storage/slurm/hunecke/fakesync/data/voxtest_fakeavceleb/preprocessed
 
 # 4. Configuration
 NUM_SHARDS=10
-WORKERS=32
+WORKERS=16
 # Legacy Parity Configs
 MAX_AUDIO_LENGTH=1024
 TARGET_LENGTH=42
@@ -43,7 +43,7 @@ echo "Input: ${INPUT_FILE}"
 echo "Output: ${OUTPUT_DIR}"
 
 # 5. Run Extraction
-srun python3 ${PROJECT_PATH}/preprocess/create_sharded_dataset.py \
+python3 ${PROJECT_PATH}/preprocess/create_sharded_dataset.py \
     --input_file ${INPUT_FILE} \
     --output_dir ${OUTPUT_DIR} \
     --num_shards ${NUM_SHARDS} \
