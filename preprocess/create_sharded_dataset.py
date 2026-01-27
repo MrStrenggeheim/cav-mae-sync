@@ -92,30 +92,30 @@ def process_single_video(args):
 
     # Audio Processing
     try:
-        try:
-            waveform, sr = torchaudio.load(video_path)
+        # try:
+        #     waveform, sr = torchaudio.load(video_path)
             
-            # Mix to mono
-            if waveform.shape[0] > 1:
-                # select ch0 (TODO: Do we really only want to use ch0?)
-                waveform = waveform[0:1, :]
+        #     # Mix to mono
+        #     if waveform.shape[0] > 1:
+        #         # select ch0 (TODO: Do we really only want to use ch0?)
+        #         waveform = waveform[0:1, :]
                 
-            if sr != 16000:
-                 resampler = torchaudio.transforms.Resample(sr, 16000)
-                 waveform = resampler(waveform)
-                 sr = 16000
+        #     if sr != 16000:
+        #          resampler = torchaudio.transforms.Resample(sr, 16000)
+        #          waveform = resampler(waveform)
+        #          sr = 16000
                  
-        except Exception as e:
-            logging.warning(f"torchaudio.load failed for {video_path}, falling back to ffmpeg CLI: {e}")
-            command = [
-                'ffmpeg', '-v', 'quiet', '-i', video_path, 
-                '-f', 's16le', '-ar', '16000', '-ac', '1', 
-                '-af', 'pan=mono|c0=c0', '-'
-            ]
-            pipe = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-            raw_audio = np.frombuffer(pipe.stdout, dtype=np.int16)
-            waveform = torch.from_numpy(raw_audio).float().unsqueeze(0) / 32768.0
-            sr = 16000
+        # except Exception as e:
+        # logging.warning(f"torchaudio.load failed for {video_path}, falling back to ffmpeg CLI: {e}")
+        command = [
+            'ffmpeg', '-v', 'quiet', '-i', video_path, 
+            '-f', 's16le', '-ar', '16000', '-ac', '1', 
+            '-af', 'pan=mono|c0=c0', '-'
+        ]
+        pipe = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        raw_audio = np.frombuffer(pipe.stdout, dtype=np.int16)
+        waveform = torch.from_numpy(raw_audio).float().unsqueeze(0) / 32768.0
+        sr = 16000
             
         # Compute Full Fbank for the video
         waveform = waveform - waveform.mean()
@@ -258,8 +258,9 @@ def main():
                })
     elif args.input_file.endswith('.csv'):
         df = pd.read_csv(args.input_file)
-        col_name = 'video_name' if 'video_name' in df.columns else 'video_path'
-        file_list = [{'video_path': row[col_name], 'labels': row.get('labels', None)} for _, row in df.iterrows()]
+        path_col_name = 'video_name' if 'video_name' in df.columns else 'video_path'
+        labels_col_name = 'labels' if 'labels' in df.columns else 'target'
+        file_list = [{'video_path': row[path_col_name], 'labels': row.get(labels_col_name, None)} for _, row in df.iterrows()]
     else:
         raise ValueError("Unknown input file format")
     
