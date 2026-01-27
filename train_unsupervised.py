@@ -898,6 +898,7 @@ def main():
         filename="cav-mae-time-{epoch:02d}-{step}",
         save_top_k=2,  # Keep all time-based checkpoints
         save_last=True,
+        save_on_exception=True,
         train_time_interval=timedelta(hours=args.checkpoint_interval_hours),
     )
 
