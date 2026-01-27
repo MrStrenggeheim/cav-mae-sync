@@ -105,7 +105,6 @@ def process_single_video(args):
         #          waveform = resampler(waveform)
         #          sr = 16000
                  
-<<<<<<< HEAD
         # except Exception as e:
         # logging.warning(f"torchaudio.load failed for {video_path}, falling back to ffmpeg CLI: {e}")
         command = [
@@ -117,19 +116,6 @@ def process_single_video(args):
         raw_audio = np.frombuffer(pipe.stdout, dtype=np.int16).copy()
         waveform = torch.from_numpy(raw_audio).float().unsqueeze(0) / 32768.0
         sr = 16000
-=======
-        except Exception as e:
-            logging.warning(f"torchaudio.load failed for {video_path}, falling back to ffmpeg CLI: {e}")
-            command = [
-                'ffmpeg', '-v', 'quiet', '-i', video_path, 
-                '-f', 's16le', '-ar', '16000', '-ac', '1', 
-                '-af', 'pan=mono|c0=c0', '-'
-            ]
-            pipe = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-            raw_audio = np.frombuffer(pipe.stdout, dtype=np.int16).copy()
-            waveform = torch.from_numpy(raw_audio).float().unsqueeze(0) / 32768.0
-            sr = 16000
->>>>>>> 8e569ff7ea50c9d6a3a1e3fef7e96bf03ce62f8e
             
         # Compute Full Fbank for the video
         waveform = waveform - waveform.mean()
