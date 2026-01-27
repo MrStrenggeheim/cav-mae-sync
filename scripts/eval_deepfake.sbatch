@@ -33,9 +33,11 @@ DATASET_JSON=/storage/slurm/schnackl/fakesync/data/fakeavceleb/FakeAVCeleb/prepr
 
 # TODO: Update this to your trained checkpoint path
 # Example: ${PROJECT_PATH}/checkpoints/unsupervised_train_20231027_120000/epoch=49-step=1000.ckpt
-CHECKPOINT_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_voxceleb2_1epoch_1worker/last.ckpt
+# CHECKPOINT_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_voxceleb2_1epoch_1worker/last.ckpt
+CHECKPOINT_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_20260126_210752/cav-mae-time-epoch=03-stepstep=11808.ckpt
 
-OUTPUT_CSV=${PROJECT_PATH}/outputs/checkpoints/unsupervised_voxceleb2_1epoch_1worker/eval_results_$(date +%Y%m%d_%H%M%S).csv
+# OUTPUT_CSV=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_20260126_210752/eval_results_$(date +%Y%m%d_%H%M%S).csv
+OUTPUT_CSV="${CHECKPOINT_PATH%.*}_eval.csv"
 
 # 4. Evaluation Configuration
 # Batch size must be 1 for per-video scoring

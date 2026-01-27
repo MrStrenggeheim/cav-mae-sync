@@ -884,19 +884,20 @@ def main():
     checkpoint_callback = ModelCheckpoint(
         dirpath=args.save_path,
         filename="cav-mae-{epoch:02d}-{train_loss_total:.2f}",
-        save_top_k=3,
+        save_top_k=2,
         save_last=True,  # Also save last.ckpt at each epoch end
         monitor="train/loss/total",
         mode="min",
         every_n_epochs=1,  # Ensure we save at every epoch boundary
     )
 
-    # Separate callback for periodic time-based checkpoints (disaster recovery)
+    # Separate callback for periodic time-based checkpoints 
     # Note: With IterableDataset, mid-epoch checkpoints will restart at epoch beginning when resumed
     time_checkpoint_callback = ModelCheckpoint(
         dirpath=args.save_path,
-        filename="cav-mae-time-{epoch:02d}-step{step}",
-        save_top_k=-1,  # Keep all time-based checkpoints
+        filename="cav-mae-time-{epoch:02d}-{step}",
+        save_top_k=2,  # Keep all time-based checkpoints
+        save_last=True,
         train_time_interval=timedelta(hours=args.checkpoint_interval_hours),
     )
 

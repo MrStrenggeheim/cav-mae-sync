@@ -2,10 +2,10 @@
 #SBATCH --job-name="Train CAV-MAE-Sync Sharded"
 #SBATCH --nodes=1
 #SBATCH --cpus-per-gpu=5
-#SBATCH --gres=gpu:a40:4
+#SBATCH --gres=gpu:a40:2
 #SBATCH --mem=64G
-#SBATCH --time=72:00:00
-#SBATCH --mail-type=END
+#SBATCH --time=3-00:00:00
+#SBATCH --mail-type=BEGIN,END
 #SBATCH --output=/storage/slurm/hunecke/fakesync/slurm_logs/slurm-cav-mae-sync-train-sharded-%j.out
 #SBATCH --error=/storage/slurm/hunecke/fakesync/slurm_logs/slurm-cav-mae-sync-train-sharded-%j.err
 
@@ -28,7 +28,8 @@ nvidia-smi
 # 3. Paths
 PROJECT_PATH=/storage/slurm/hunecke/fakesync/cav-mae-sync
 SHARDED_DATASET_DIR=/storage/slurm/hunecke/fakesync/data/voxceleb2/preprocessed/shards_train
-RESUME_CHECKPOINT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_mae_sync.pth
+RESUME_CHECKPOINT_PATH=/storage/slurm/hunecke/fakesync/cav-mae-sync/outputs/checkpoints/unsupervised_voxceleb2_3epoch_1worker/last.ckpt
+# RESUME_CHECKPOINT_PATH=/storage/slurm/schnackl/fakesync/cav-mae-sync/pretrained_models/cav_mae_sync.pth
 SAVE_PATH=${PROJECT_PATH}/outputs/checkpoints/unsupervised_train_sharded_$(date +%Y%m%d_%H%M%S)
 
 # 4. Training Configuration
@@ -69,10 +70,10 @@ python3 ${PROJECT_PATH}/train_unsupervised.py \
     --resume ${RESUME_CHECKPOINT_PATH} \
     --contrast_bidirect \
     --contrast_loss_weight 0.7 \
-    --contrast_inter_weight 0.4 \
-    --contrast_intra_weight 0.6 \
+    --contrast_inter_weight 0.35 \
+    --contrast_intra_weight 0.65 \
     --mae_loss_weight 0.8 \
-    --log_freq 4 \
+    --log_freq 8 \
     --cls_token \
     --num_register_tokens 8 \
     --gradient_accumulation_steps ${ACCUMULATION_STEPS} \
