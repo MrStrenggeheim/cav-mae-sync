@@ -146,7 +146,7 @@ def get_retrieval_result(audio_model, val_loader, direction='audio', model_type=
     with torch.no_grad():
         # Add tqdm progress bar
         for i, batch in tqdm(enumerate(val_loader), total=len(val_loader), desc="Processing batches"):
-            if 'sync' or 'enhanced' in model_type:
+            if 'sync' in model_type or 'enhanced' in model_type:
                 if len(batch) == 5:
                     a_input, v_input, labels, video_id, frame_indices = batch
                 else: 
@@ -156,7 +156,7 @@ def get_retrieval_result(audio_model, val_loader, direction='audio', model_type=
             if i == 0:
                 print("A_shape", a_input.shape)
                 print("V_shape", v_input.shape)
-            if 'sync' or 'enhanced' in model_type:
+            if 'sync' in model_type or 'enhanced' in model_type:
                 # flatten batch so we process all frames at the same time
                 a_input = a_input.reshape(a_input.shape[0] * a_input.shape[1], a_input.shape[2], a_input.shape[3])
                 v_input = v_input.reshape(v_input.shape[0] * v_input.shape[1], v_input.shape[2], v_input.shape[3], v_input.shape[4])
@@ -229,7 +229,7 @@ def eval_retrieval(model, data, audio_conf, label_csv, direction, num_class, mod
     # eval setting
     val_audio_conf = audio_conf
     val_audio_conf['frame_use'] = frame_use
-    if 'sync' or 'enhanced' in model_type:
+    if 'sync' in model_type or 'enhanced' in model_type:
         val_loader = torch.utils.data.DataLoader(dataloader_sync.AudiosetDataset(data, label_csv=label_csv, audio_conf=val_audio_conf), batch_size=batch_size, shuffle=False, num_workers=32, pin_memory=True, collate_fn=train_collate_fn)
     else:
         val_loader = torch.utils.data.DataLoader(dataloader.AudiosetDataset(data, label_csv=label_csv, audio_conf=val_audio_conf), batch_size=batch_size, shuffle=False, num_workers=32, pin_memory=True)
