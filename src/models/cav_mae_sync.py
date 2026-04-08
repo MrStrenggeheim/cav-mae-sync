@@ -373,6 +373,9 @@ class CAVMAE(nn.Module):
             torch.nn.init.normal_(self.cls_token_a, std=0.02)
             torch.nn.init.normal_(self.cls_token_v, std=0.02)
 
+        if self.num_register_tokens > 0:
+            torch.nn.init.normal_(self.register_tokens, std=0.02)
+
         # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
         torch.nn.init.normal_(self.modality_a, std=0.02)
         torch.nn.init.normal_(self.modality_v, std=0.02)
@@ -588,8 +591,8 @@ class CAVMAE(nn.Module):
         if self.cls_token:
             # split the local patch tokens from the cls tokens
             # cls tokens
-            cls_a = self.norm_a(ca[:, 0, :].squeeze())  # This gets the audio CLS token from ca
-            cls_v = self.norm_v(cv[:, 0, :].squeeze())  # This gets the visual CLS token from cv
+            cls_a = self.norm_a(ca[:, 0, :])  # (batch, embed_dim) — no squeeze needed
+            cls_v = self.norm_v(cv[:, 0, :])  # (batch, embed_dim) — no squeeze needed
             # local patch tokens
             ca = self.norm_a(ca[:, 1:, :])
             cv = self.norm_v(cv[:, 1:, :])
@@ -731,8 +734,8 @@ class CAVMAE(nn.Module):
             mask_block.fill_diagonal_(False)
             mask_ignore = mask_block
             
-            # In-place masking: safe because intra_logits (which used these values) is already computed and copied
-            total[mask_ignore] = -float('inf')
+            # Mask same-video pairs in inter-video loss (use out-of-place op for autograd safety)
+            total = total.masked_fill(mask_ignore, float('-inf'))
             
             inter_targets = torch.arange(n_samples, device=total.device)
             
@@ -939,10 +942,14 @@ class CAVMAE(nn.Module):
 
         loss = loss_mae + loss_c
 
-        recon_a = self.unpatchify(pred_a, 1, 8, int(self.audio_length / 16), 16)
-        recon_a = torch.einsum("nchw->nhwc", recon_a)
-        recon_v = self.unpatchify(pred_v, 3, 14, 14, 16)
-        recon_v = torch.einsum("nchw->nhwc", recon_v)
+        if mae_loss_weight != 0:
+            recon_a = self.unpatchify(pred_a, 1, 8, int(self.audio_length / 16), 16)
+            recon_a = torch.einsum("nchw->nhwc", recon_a)
+            recon_v = self.unpatchify(pred_v, 3, 14, 14, 16)
+            recon_v = torch.einsum("nchw->nhwc", recon_v)
+        else:
+            recon_a = None
+            recon_v = None
 
         if self.cls_token:
             if self.global_local_losses:
@@ -1070,10 +1077,12 @@ class CAVMAE(nn.Module):
             a = a[:, : -self.num_register_tokens, :]
             v = v[:, : -self.num_register_tokens, :]
 
+        ca = a
         for blk in self.blocks_u:
-            ca = blk(a, "a")
+            ca = blk(ca, "a")
+        cv = v
         for blk in self.blocks_u:
-            cv = blk(v, "v")
+            cv = blk(cv, "v")
 
         if self.contrastive_heads:
             for blk in self.constrative_head_audio:
@@ -1084,8 +1093,8 @@ class CAVMAE(nn.Module):
         if self.cls_token:
             # split the local patch tokens from the cls tokens
             # cls tokens
-            cls_a = self.norm_a(ca[:, 0, :].squeeze())  # This gets the audio CLS token from ca
-            cls_v = self.norm_v(cv[:, 0, :].squeeze())  # This gets the visual CLS token from cv
+            cls_a = self.norm_a(ca[:, 0, :])  # (batch, embed_dim) — no squeeze needed
+            cls_v = self.norm_v(cv[:, 0, :])  # (batch, embed_dim) — no squeeze needed
             # local patch tokens
             ca = self.norm_a(ca[:, 1:, :])
             cv = self.norm_v(cv[:, 1:, :])
@@ -1397,8 +1406,8 @@ class CAVMAEFT(nn.Module):
 
                 x = torch.cat((cls_tokens_a, cls_tokens_v), dim=1)
             else:
-                a = a.mean(dim=1).squeeze()
-                v = v.mean(dim=1).squeeze()
+                a = a.mean(dim=1)  # (batch, embed_dim) — no squeeze needed
+                v = v.mean(dim=1)  # (batch, embed_dim) — no squeeze needed
                 x = torch.cat((a, v), dim=1)
 
             if self.aggregate == "self_attention_cls":
@@ -1734,7 +1743,7 @@ class CAVMAEFT(nn.Module):
 
                 x = torch.cat((cls_tokens_a, cls_tokens_v), dim=1)
             else:
-                a = a.mean(dim=1).squeeze()
-                v = v.mean(dim=1).squeeze()
+                a = a.mean(dim=1)  # (batch, embed_dim) — no squeeze needed
+                v = v.mean(dim=1)  # (batch, embed_dim) — no squeeze needed
                 x = torch.cat((a, v), dim=1)
             return x
