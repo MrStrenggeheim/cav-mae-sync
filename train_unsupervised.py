@@ -50,13 +50,6 @@ class CAVMAEModule(pl.LightningModule):
         # DDP sync: max batches per epoch (set by DDPBatchSyncCallback)
         self.max_batches_per_epoch = None
 
-    def on_train_batch_start(self, batch, batch_idx):
-        import time
-
-        if self._batch_start_time is not None:
-            self._profile_data_time += time.perf_counter() - self._batch_start_time
-        self._batch_start_time = time.perf_counter()
-
     def forward(self, fbanks, images, mode="unsupervised_train"):
         return self.model(
             fbanks,
@@ -460,11 +453,28 @@ class CAVMAEModule(pl.LightningModule):
 
     def configure_optimizers(self):
         # Use fused AdamW for faster CUDA execution (PyTorch 2.0+)
-        fused = torch.cuda.is_available() and hasattr(torch.optim.AdamW, "fused")
+        try:
+            fused = torch.cuda.is_available()
+            # Test if fused kwarg is supported by constructing a dummy
+            torch.optim.AdamW([torch.zeros(1)], fused=fused)
+        except TypeError:
+            fused = False
+
+        # Exclude biases, norms, and learned tokens from weight decay
+        no_decay_keywords = ['bias', 'norm', 'cls_token', 'modality', 'pos_embed', 'register_tokens', 'mask_token']
+        decay_params = [p for n, p in self.named_parameters()
+                        if not any(nd in n for nd in no_decay_keywords) and p.requires_grad]
+        no_decay_params = [p for n, p in self.named_parameters()
+                           if any(nd in n for nd in no_decay_keywords) and p.requires_grad]
+
+        logging.info(f"Optimizer param groups: {len(decay_params)} decay, {len(no_decay_params)} no_decay")
+
         optimizer = optim.AdamW(
-            self.parameters(),
+            [
+                {'params': decay_params, 'weight_decay': self.hparams.weight_decay},
+                {'params': no_decay_params, 'weight_decay': 0.0},
+            ],
             lr=self.hparams.lr,
-            weight_decay=self.hparams.weight_decay,
             fused=fused,
         )
 
@@ -473,8 +483,10 @@ class CAVMAEModule(pl.LightningModule):
             # This is especially important for longer training runs (e.g., 20 epochs)
             min_lr = self.hparams.lr * 0.01
 
+            # Note: SequentialLR calls step() during __init__, consuming one iteration.
+            # Use total_iters+1 to compensate (pytorch/pytorch#116776).
             warmup_scheduler = optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=0.01, total_iters=self.hparams.warmup_epochs
+                optimizer, start_factor=0.01, total_iters=self.hparams.warmup_epochs + 1
             )
             cosine_scheduler = optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
@@ -897,7 +909,7 @@ def main():
         dirpath=args.save_path,
         filename="cav-mae-time-{epoch:02d}-{step}",
         save_top_k=2,  # Keep all time-based checkpoints
-        save_last=True,
+        save_last=False,  # Epoch-based callback owns last.ckpt
         save_on_exception=True,
         train_time_interval=timedelta(hours=args.checkpoint_interval_hours),
     )
