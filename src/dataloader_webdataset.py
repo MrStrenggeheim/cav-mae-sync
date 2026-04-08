@@ -83,7 +83,7 @@ def build_webdataset(
     shuffle: bool = True,
     shuffle_buffer: int = 5000,
     resampled: bool = True,
-    batches_per_epoch: int = None,
+    samples_per_epoch: int = None,
 ) -> wds.WebDataset:
     """
     Build a WebDataset pipeline that produces the same output format
@@ -95,7 +95,8 @@ def build_webdataset(
         shuffle: Whether to shuffle shards and samples
         shuffle_buffer: Size of the cross-shard shuffle buffer
         resampled: Use resampled shards for DDP (infinite stream, handles unequal shards)
-        batches_per_epoch: Number of batches per epoch (required when resampled=True)
+        samples_per_epoch: Number of samples per epoch (required when resampled=True).
+            Note: with_epoch() operates at the sample level, before DataLoader batching.
 
     Returns:
         WebDataset pipeline that yields (fbanks, images, video_id, frame_indices) tuples
@@ -196,10 +197,12 @@ def build_webdataset(
     if shuffle:
         dataset = dataset.shuffle(shuffle_buffer)
 
-    dataset = dataset.map(decode_and_preprocess)
+    # Handle corrupt shard entries gracefully (log warning, skip entry)
+    dataset = dataset.map(decode_and_preprocess, handler=wds.warn_and_continue)
 
-    if resampled and batches_per_epoch is not None:
-        dataset = dataset.with_epoch(batches_per_epoch)
+    if resampled and samples_per_epoch is not None:
+        # with_epoch() operates at sample level (before DataLoader batching)
+        dataset = dataset.with_epoch(samples_per_epoch)
 
     return dataset
 

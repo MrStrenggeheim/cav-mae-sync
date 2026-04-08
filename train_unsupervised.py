@@ -536,7 +536,7 @@ class CAVMAEDataModule(pl.LightningDataModule):
         if not shard_dir:
             raise ValueError("--sharded_dataset_dir is required (WebDataset .tar shards)")
 
-        # Estimate batches per epoch from metadata if available
+        # Estimate samples per epoch from metadata if available
         import json
         meta_path = os.path.join(shard_dir, 'webdataset_metadata.json')
         if os.path.exists(meta_path):
@@ -568,7 +568,7 @@ class CAVMAEDataModule(pl.LightningDataModule):
             shuffle=True,
             shuffle_buffer=5000,
             resampled=True,
-            batches_per_epoch=self.batches_per_epoch,
+            samples_per_epoch=total_samples,  # with_epoch() operates at sample level
         )
 
     def train_dataloader(self):
