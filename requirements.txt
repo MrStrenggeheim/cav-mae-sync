@@ -5,4 +5,6 @@ timm==0.4.5
 torch==1.13.1
 torchaudio==0.13.1
 torchvision==0.14.1
-tqdm==4.64.0 
+tqdm==4.64.0
+webdataset>=0.2.86
+decord>=0.6.0

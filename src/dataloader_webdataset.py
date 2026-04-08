@@ -111,8 +111,9 @@ def build_webdataset(
     # Extract config
     target_length = audio_conf.get('target_length', 48)
     num_mel_bins = audio_conf.get('num_mel_bins', 128)
-    norm_mean = audio_conf.get('mean', None)
-    norm_std = audio_conf.get('std', None)
+    skip_norm = audio_conf.get('skip_norm', False)
+    norm_mean = audio_conf.get('mean', None) if not skip_norm else None
+    norm_std = audio_conf.get('std', None) if not skip_norm else None
     im_res = audio_conf.get('im_res', 224)
     total_frame = audio_conf.get('total_frame', 16)
     augmentation = audio_conf.get('augmentation', False)
