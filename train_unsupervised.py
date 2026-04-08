@@ -15,7 +15,7 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
-from src.dataloader_sync import AudiosetDataset, unsupervised_collate_fn
+from src.dataloader_webdataset import build_webdataset, unsupervised_collate_fn
 from src.fakesync_config import FakeSyncConfig
 from src.models.cav_mae_sync import CAVMAE
 
@@ -47,7 +47,7 @@ class CAVMAEModule(pl.LightningModule):
         self._profile_step_count = 0
         self._batch_start_time = None
 
-        # DDP sync: max batches per epoch (set by DDPBatchSyncCallback)
+        # Max batches per epoch (informational, set by DataModule)
         self.max_batches_per_epoch = None
 
     def forward(self, fbanks, images, mode="unsupervised_train"):
@@ -72,9 +72,7 @@ class CAVMAEModule(pl.LightningModule):
             f"[Rank {self.global_rank}] Batch {batch_idx}: Training Step Start"
         )
 
-        # Note: DDP sync is handled by setting trainer.limit_train_batches in DDPBatchSyncCallback.
-        # This ensures all ranks process exactly the same number of batches per epoch.
-        # The max_batches_per_epoch attribute is now only used for informational logging.
+        # Note: DDP sync is handled automatically by WebDataset (resampled=True).
 
         fbanks, images, video_ids, frame_indices = batch
 
@@ -519,10 +517,10 @@ class CAVMAEModule(pl.LightningModule):
 
 class CAVMAEDataModule(pl.LightningDataModule):
     """
-    LightningDataModule for CAV-MAE training with proper DDP support.
+    LightningDataModule for CAV-MAE training with WebDataset.
 
-    Uses Lightning's limit_train_batches to ensure all ranks process the same
-    number of batches per epoch, preventing NCCL deadlocks.
+    DDP is handled automatically by WebDataset's resampled=True mode
+    with split_by_node/worker. No manual batch synchronization needed.
     """
 
     def __init__(self, args, audio_conf):
@@ -530,121 +528,60 @@ class CAVMAEDataModule(pl.LightningDataModule):
         self.args = args
         self.audio_conf = audio_conf
         self.dataset = None
-        self.min_batches_per_epoch = None  # Set during setup()
-        self.discarded_samples_info = None  # For logging
+        self.batches_per_epoch = None
 
     def setup(self, stage=None):
-        """
-        Called after DDP initialization on each process.
-        Creates the dataset and computes synchronized batch count.
-        """
-        import torch.distributed as dist
+        """Called after DDP initialization on each process."""
+        shard_dir = self.args.sharded_dataset_dir
+        if not shard_dir:
+            raise ValueError("--sharded_dataset_dir is required (WebDataset .tar shards)")
 
-        if self.args.sharded_dataset_dir:
-            from src.dataloader_sharded import ShardedAudiosetDataset
-
-            # Get rank and world_size from trainer (available after DDP init)
-            if self.trainer and hasattr(self.trainer, "global_rank"):
-                rank = self.trainer.global_rank
-                world_size = self.trainer.world_size
-            elif dist.is_initialized():
-                rank = dist.get_rank()
-                world_size = dist.get_world_size()
-            else:
-                rank = int(os.environ.get("RANK", 0))
-                world_size = int(os.environ.get("WORLD_SIZE", 1))
-
-            logging.info(f"DataModule setup: rank={rank}, world_size={world_size}")
-
-            # Create dataset with explicit rank/world_size (NO max_samples - we limit at Trainer level)
-            self.dataset = ShardedAudiosetDataset(
-                shard_dir=self.args.sharded_dataset_dir,
-                audio_conf=self.audio_conf,
-                use_mmap=self.args.use_mmap,
-                dataset_fraction=self.args.dataset_fraction,
-                rank=rank,
-                world_size=world_size,
+        # Estimate batches per epoch from metadata if available
+        import json
+        meta_path = os.path.join(shard_dir, 'webdataset_metadata.json')
+        if os.path.exists(meta_path):
+            with open(meta_path) as f:
+                meta = json.load(f)
+            # Use the split's total_valid count
+            total_samples = sum(
+                split_info.get('total_valid', 0)
+                for split_info in meta.get('splits', {}).values()
             )
-
-            # Compute synchronized batch count for DDP
-            if world_size > 1:
-                local_samples = self.dataset.count_samples_for_rank()
-                batch_size = self.args.batch_size
-                local_batches = local_samples // batch_size
-
-                logging.info(
-                    f"Rank {rank}: {local_samples} samples -> {local_batches} batches (batch_size={batch_size})"
-                )
-
-                # Sync minimum batch count across all ranks
-                batch_tensor = torch.tensor(
-                    [local_batches],
-                    dtype=torch.long,
-                    device="cuda" if torch.cuda.is_available() else "cpu",
-                )
-                dist.all_reduce(batch_tensor, op=dist.ReduceOp.MIN)
-                self.min_batches_per_epoch = batch_tensor.item()
-
-                # Log discarded samples for monitoring
-                used_samples = self.min_batches_per_epoch * batch_size
-                discarded = local_samples - used_samples
-                pct = (discarded / local_samples * 100) if local_samples > 0 else 0
-
-                self.discarded_samples_info = {
-                    "rank": rank,
-                    "local_samples": local_samples,
-                    "used_samples": used_samples,
-                    "discarded": discarded,
-                    "discard_pct": pct,
-                }
-
-                logging.info(
-                    f"Rank {rank}: DDP sync -> {self.min_batches_per_epoch} batches/epoch "
-                    f"(discarding {discarded} samples = {pct:.1f}%)"
-                )
-
-                # Enforce per-worker sample limiting to prevent DataLoader hangs
-                self.dataset.set_max_samples(used_samples)
-            else:
-                # Single GPU: use all available batches
-                local_samples = self.dataset.count_samples_for_rank()
-                self.min_batches_per_epoch = local_samples // self.args.batch_size
-                logging.info(f"Single GPU: {self.min_batches_per_epoch} batches/epoch")
         else:
-            # Non-sharded dataset (legacy JSON-based)
-            self.dataset = AudiosetDataset(
-                dataset_json_file=self.args.dataset_json,
-                audio_conf=self.audio_conf,
-                label_csv=self.args.label_csv,
+            # Fallback: estimate from tar file count and typical shard size
+            import glob
+            n_shards = len(glob.glob(os.path.join(shard_dir, '*.tar')))
+            total_samples = n_shards * 500  # Conservative estimate
+            logging.warning(
+                f"No metadata found, estimating {total_samples} samples from {n_shards} shards"
             )
-            self.min_batches_per_epoch = None  # Let DataLoader handle it
+
+        self.batches_per_epoch = total_samples // self.args.batch_size
+        logging.info(
+            f"WebDataset: ~{total_samples} samples, "
+            f"{self.batches_per_epoch} batches/epoch (batch_size={self.args.batch_size})"
+        )
+
+        self.dataset = build_webdataset(
+            shard_dir=shard_dir,
+            audio_conf=self.audio_conf,
+            shuffle=True,
+            shuffle_buffer=5000,
+            resampled=True,
+            batches_per_epoch=self.batches_per_epoch,
+        )
 
     def train_dataloader(self):
-        if self.args.sharded_dataset_dir:
-            return DataLoader(
-                self.dataset,
-                batch_size=self.args.batch_size,
-                num_workers=self.args.num_workers,
-                collate_fn=unsupervised_collate_fn,
-                pin_memory=True,
-                drop_last=True,
-                persistent_workers=True if self.args.num_workers > 0 else False,
-                prefetch_factor=4 if self.args.num_workers > 0 else None,
-                timeout=(
-                    120 if self.args.num_workers > 0 else 0
-                ),  # 2 minute timeout for workers
-            )
-        else:
-            return DataLoader(
-                self.dataset,
-                batch_size=self.args.batch_size,
-                shuffle=True,
-                num_workers=self.args.num_workers,
-                collate_fn=unsupervised_collate_fn,
-                pin_memory=True,
-                drop_last=True,
-                persistent_workers=True if self.args.num_workers > 0 else False,
-            )
+        return DataLoader(
+            self.dataset,
+            batch_size=self.args.batch_size,
+            num_workers=self.args.num_workers,
+            collate_fn=unsupervised_collate_fn,
+            pin_memory=True,
+            drop_last=True,
+            persistent_workers=True if self.args.num_workers > 0 else False,
+            prefetch_factor=4 if self.args.num_workers > 0 else None,
+        )
 
 
 def get_args():
@@ -955,47 +892,15 @@ def main():
     class FixedTQDMProgressBar(TQDMProgressBar):
         def init_train_tqdm(self):
             bar = super().init_train_tqdm()
-            # Fix for IterableDataset with DDP sync where we know the exact size
+            # WebDataset with resampled=True + with_epoch() defines epoch length
             if (
-                hasattr(self.trainer.datamodule, "min_batches_per_epoch")
-                and self.trainer.datamodule.min_batches_per_epoch is not None
+                hasattr(self.trainer.datamodule, "batches_per_epoch")
+                and self.trainer.datamodule.batches_per_epoch is not None
             ):
-                bar.total = self.trainer.datamodule.min_batches_per_epoch
+                bar.total = self.trainer.datamodule.batches_per_epoch
             return bar
 
-    class DDPBatchSyncCallback(pl.Callback):
-        """Callback to sync batch counts across DDP ranks after datamodule setup.
-
-        Sets trainer.limit_train_batches to ensure all ranks process the same number
-        of batches per epoch, preventing NCCL deadlocks with IterableDataset.
-        """
-
-        def on_train_start(self, trainer, pl_module):
-            """Called after setup() and before training starts."""
-            if hasattr(trainer.datamodule, "min_batches_per_epoch"):
-                min_batches = trainer.datamodule.min_batches_per_epoch
-                if min_batches is not None:
-                    # Set trainer's limit - this controls when the epoch ends
-                    trainer.limit_train_batches = min_batches
-
-                    # Also set on the module for informational purposes
-                    if hasattr(pl_module, "max_batches_per_epoch"):
-                        pl_module.max_batches_per_epoch = min_batches
-
-                    logging.info(
-                        f"DDPBatchSyncCallback: Synced to {min_batches} batches/epoch (progress bar will show total)"
-                    )
-
-                    # Log discarded samples info if available
-                    if trainer.datamodule.discarded_samples_info:
-                        info = trainer.datamodule.discarded_samples_info
-                        logging.info(
-                            f"Rank {info['rank']}: Using {info['used_samples']} samples, "
-                            f"discarding {info['discarded']} ({info['discard_pct']:.1f}%)"
-                        )
-
-    # Add to callbacks
-    ddp_sync_callback = DDPBatchSyncCallback()
+    # No DDPBatchSyncCallback needed — WebDataset resampled=True handles DDP automatically
     pbar_callback = FixedTQDMProgressBar(refresh_rate=args.log_freq)
 
     trainer = pl.Trainer(
@@ -1008,9 +913,9 @@ def main():
             checkpoint_callback,
             time_checkpoint_callback,
             lr_monitor,
-            ddp_sync_callback,
             pbar_callback,
         ],
+        use_distributed_sampler=False,  # WebDataset handles DDP shard splitting
         logger=tb_logger,
         log_every_n_steps=args.log_freq,
         default_root_dir=args.save_path,

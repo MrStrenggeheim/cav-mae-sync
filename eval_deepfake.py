@@ -20,8 +20,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import roc_auc_score, roc_curve
 from torch.utils.data import DataLoader
 
-from src.dataloader_sync import AudiosetDataset, unsupervised_collate_fn
-from src.dataloader_sharded import ShardedAudiosetDataset
+from src.dataloader_webdataset import build_webdataset, unsupervised_collate_fn
 from train_unsupervised import CAVMAEModule
 
 import logging
@@ -533,36 +532,22 @@ def main():
     
     # Create dataset
     if args.sharded_dataset_dir:
-        logging.info(f"Using sharded dataset from {args.sharded_dataset_dir}")
-        dataset = ShardedAudiosetDataset(
+        logging.info(f"Using WebDataset shards from {args.sharded_dataset_dir}")
+        dataset = build_webdataset(
             shard_dir=args.sharded_dataset_dir,
             audio_conf=audio_conf,
-            shuffle_shards=False
+            shuffle=False,       # No shuffle for eval — deterministic ordering
+            resampled=False,     # No resampling for eval — iterate once
         )
         dataloader = DataLoader(
             dataset,
             batch_size=args.batch_size,
             num_workers=args.num_workers,
             pin_memory=True,
-            collate_fn=unsupervised_collate_fn
-        )
-    elif args.dataset_json:
-        logging.info(f"Using legacy dataset from {args.dataset_json}")
-        dataset = AudiosetDataset(
-            dataset_json_file=args.dataset_json,
-            audio_conf=audio_conf,
-            label_csv=None
-        )
-        dataloader = DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.num_workers,
             collate_fn=unsupervised_collate_fn,
-            pin_memory=True
         )
     else:
-        raise ValueError("Must provide either --dataset_json or --sharded_dataset_dir")
+        raise ValueError("Must provide --sharded_dataset_dir (WebDataset .tar shards)")
     
     # Load model
     logging.info(f"Loading checkpoint from {args.checkpoint_path}...")
