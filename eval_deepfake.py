@@ -149,24 +149,70 @@ def compute_sync_scores(
 def compute_eer(y_true: np.ndarray, y_scores: np.ndarray) -> Tuple[float, float]:
     """
     Compute Equal Error Rate (EER) and the corresponding threshold.
-    
+
     Args:
         y_true: Ground truth labels (0=real, 1=fake)
         y_scores: Predicted scores (higher = more likely fake)
-        
+
     Returns:
         eer: Equal Error Rate
         threshold: Threshold at EER
     """
     fpr, tpr, thresholds = roc_curve(y_true, y_scores)
     fnr = 1 - tpr
-    
+
     # Find the point where FPR and FNR are closest
     eer_idx = np.nanargmin(np.abs(fpr - fnr))
     eer = (fpr[eer_idx] + fnr[eer_idx]) / 2
     threshold = thresholds[eer_idx]
-    
+
     return eer, threshold
+
+
+def bootstrap_metric(y_true: np.ndarray, y_scores: np.ndarray, metric_fn, n_bootstrap: int = 1000, ci: float = 0.95, seed: int = 42) -> Tuple[float, float, float]:
+    """
+    Compute bootstrap confidence interval for a metric.
+
+    Returns:
+        point_estimate, ci_lower, ci_upper
+    """
+    rng = np.random.RandomState(seed)
+    n = len(y_true)
+    point = metric_fn(y_true, y_scores)
+
+    boot_values = []
+    for _ in range(n_bootstrap):
+        idx = rng.randint(0, n, size=n)
+        bt, bs = y_true[idx], y_scores[idx]
+        # Need both classes in bootstrap sample
+        if len(np.unique(bt)) < 2:
+            continue
+        try:
+            boot_values.append(metric_fn(bt, bs))
+        except ValueError:
+            continue
+
+    if not boot_values:
+        return point, np.nan, np.nan
+
+    alpha = (1 - ci) / 2
+    lo = np.percentile(boot_values, 100 * alpha)
+    hi = np.percentile(boot_values, 100 * (1 - alpha))
+    return point, lo, hi
+
+
+def get_manipulation_type(video_id: str) -> str:
+    """Extract manipulation type from FakeAVCeleb video ID conventions."""
+    vid = str(video_id)
+    if 'FakeVideo-FakeAudio' in vid:
+        return 'FakeVideo+FakeAudio'
+    elif 'FakeVideo-RealAudio' in vid:
+        return 'FakeVideo-RealAudio'
+    elif 'RealVideo-FakeAudio' in vid:
+        return 'RealVideo-FakeAudio'
+    elif 'RealVideo-RealAudio' in vid:
+        return 'Real'
+    return 'Unknown'
 
 
 # =============================================================================
@@ -357,22 +403,58 @@ class DeepFakeEvaluator(pl.LightningModule):
         logging.info("="*60)
         logging.info(f"Matched labels: {len(labels)} (real={n_real}, fake={n_fake})")
         
+        # --- Overall metrics with bootstrap CIs ---
         for metric_name, scores in scores_by_metric.items():
             scores = np.array(scores)
             try:
-                auc = roc_auc_score(labels, scores)
+                auc, auc_lo, auc_hi = bootstrap_metric(labels, scores, roc_auc_score)
                 eer, threshold = compute_eer(labels, scores)
-                
+                eer_val, eer_lo, eer_hi = bootstrap_metric(
+                    labels, scores, lambda y, s: compute_eer(y, s)[0]
+                )
+
                 logging.info(f"\n{metric_name}:")
-                logging.info(f"  AUC-ROC: {auc:.4f}")
-                logging.info(f"  EER: {eer:.4f} (threshold: {threshold:.4f})")
-                
-                # Log to TensorBoard
+                logging.info(f"  AUC-ROC: {auc:.4f} [{auc_lo:.4f}, {auc_hi:.4f}] (95% CI)")
+                logging.info(f"  EER: {eer:.4f} [{eer_lo:.4f}, {eer_hi:.4f}] (threshold: {threshold:.4f})")
+
                 self.log(f'auc_{metric_name}', auc)
                 self.log(f'eer_{metric_name}', eer)
-                
+
             except ValueError as e:
                 logging.warning(f"Could not compute metrics for {metric_name}: {e}")
+
+        # --- Per-manipulation-type breakdown ---
+        manip_types = {}
+        for result in self.test_outputs:
+            vid = result.video_id
+            if vid in label_map:
+                mtype = get_manipulation_type(vid)
+                if mtype not in manip_types:
+                    manip_types[mtype] = {'labels': [], 'scores': []}
+                manip_types[mtype]['labels'].append(label_map[vid])
+                manip_types[mtype]['scores'].append(-result.sync_mean)  # Use sync_mean as primary
+
+        if len(manip_types) > 1:
+            logging.info("\n" + "="*60)
+            logging.info("PER-MANIPULATION-TYPE BREAKDOWN (sync_mean)")
+            logging.info("="*60)
+            for mtype, data in sorted(manip_types.items()):
+                mt_labels = np.array(data['labels'])
+                mt_scores = np.array(data['scores'])
+                n_real = (mt_labels == 0).sum()
+                n_fake = (mt_labels == 1).sum()
+                logging.info(f"\n{mtype}: {len(mt_labels)} samples (real={n_real}, fake={n_fake})")
+                if n_real > 0 and n_fake > 0:
+                    try:
+                        auc = roc_auc_score(mt_labels, mt_scores)
+                        eer, _ = compute_eer(mt_labels, mt_scores)
+                        logging.info(f"  AUC-ROC: {auc:.4f}, EER: {eer:.4f}")
+                        self.log(f'auc_sync_mean/{mtype}', auc)
+                        self.log(f'eer_sync_mean/{mtype}', eer)
+                    except ValueError as e:
+                        logging.warning(f"  Could not compute: {e}")
+                else:
+                    logging.info(f"  Skipped (need both classes)")
 
 
 # =============================================================================
