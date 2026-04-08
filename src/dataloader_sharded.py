@@ -196,7 +196,7 @@ class ShardedAudiosetDataset(IterableDataset):
         Always returns tensor of shape [target_length, 128].
         """
         FRAME_SHIFT_MS = 10
-        center_frame = int(timestamp_ms / FRAME_SHIFT_MS)
+        center_frame = round(timestamp_ms / FRAME_SHIFT_MS)
         half_len = target_length // 2
         
         start = center_frame - half_len
@@ -218,11 +218,15 @@ class ShardedAudiosetDataset(IterableDataset):
         
         # Extract segment
         segment = full_fbank[start:end, :]
-        
-        # Pad if needed (at edges of audio)
+
+        # Normalize BEFORE padding so padded zeros represent neutral signal
+        if self.norm_mean is not None and not self.skip_norm:
+            segment = (segment - self.norm_mean) / self.norm_std
+
+        # Pad if needed (at edges of audio) — zeros are neutral after normalization
         if pad_left > 0 or pad_right > 0:
             segment = torch.nn.functional.pad(segment, (0, 0, pad_left, pad_right))
-        
+
         if segment.shape[0] != target_length:
             original_shape = segment.shape[0]
             if segment.shape[0] < target_length:
@@ -254,6 +258,7 @@ class ShardedAudiosetDataset(IterableDataset):
             # Use timestamp-based slicing if available, else fallback to old method
             if frame_timestamps_ms is not None:
                 timestamp_ms = frame_timestamps_ms[i]
+                # slice_fbank_at_timestamp normalizes before padding internally
                 fbank = self.slice_fbank_at_timestamp(
                     full_fbank, fbank_length, timestamp_ms, target_length
                 )
@@ -275,10 +280,9 @@ class ShardedAudiosetDataset(IterableDataset):
                     fbank = torch.nn.functional.pad(fbank, (0, 0, 0, pad_len))
                 elif fbank.shape[0] > target_length:
                     fbank = fbank[:target_length, :]
-            
-            # Normalize Audio
-            if not self.skip_norm:
-                 fbank = (fbank - self.norm_mean) / self.norm_std
+                # Normalize audio (legacy path only — timestamp path normalizes internally)
+                if not self.skip_norm:
+                    fbank = (fbank - self.norm_mean) / self.norm_std
 
             # Defensive shape validation to prevent torch.stack failures
             expected_shape = (target_length, self.num_mel_bins)
@@ -370,6 +374,10 @@ class ShardedAudiosetDataset(IterableDataset):
             random.shuffle(shards_for_worker)
 
         # Each worker yields ALL samples from its assigned shards - no interleaving
+        # Divide max_samples by num_workers so total across all workers matches the target
+        effective_max = None
+        if self.max_samples is not None:
+            effective_max = self.max_samples // num_workers
         sample_idx = 0
         for shard_idx, shard_path in enumerate(shards_for_worker):
             load_start = time.time()
@@ -393,7 +401,7 @@ class ShardedAudiosetDataset(IterableDataset):
 
             for item in data_list:
                 # Check max_samples limit (for DDP sync)
-                if self.max_samples is not None and sample_idx >= self.max_samples:
+                if effective_max is not None and sample_idx >= effective_max:
                     return
 
                 try:
